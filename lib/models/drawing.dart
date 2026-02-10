@@ -1,7 +1,20 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-enum ToolType { pressure, pen, eraser, lasso }
+enum ToolType {
+  pressure,
+  pen,
+  eraser,
+  rect,
+  circle,
+  fillRect,
+  fillCircle,
+  line,
+  dot30,
+  dot60,
+  dot80,
+  lasso,
+}
 
 enum SelectionHandle {
   none,
@@ -20,16 +33,24 @@ enum SelectionHandle {
 class DrawnLine {
   final List<Point> points;
   final Color color;
+  final double width;
+  final ToolType tool;
   final bool variableWidth;
   final bool isEraser;
+  final double eraserAlpha; // 1.0 for normal strokes; 0.5/1.0 for eraser passes
   bool isFinished;
+  final Rect? shapeRect;
 
   DrawnLine(
     this.points, {
     required this.color,
+    required this.width,
+    required this.tool,
     required this.variableWidth,
     this.isEraser = false,
+    this.eraserAlpha = 1.0,
     this.isFinished = false,
+    this.shapeRect,
   });
 }
 

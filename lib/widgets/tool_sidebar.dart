@@ -15,37 +15,75 @@ class ToolSidebar extends StatelessWidget {
         return Container(
           width: 80,
           color: Colors.grey.shade200,
-          child: Column(
-            children: [
-              const SizedBox(height: 12),
-              _ToolButton(
-                label: 'P',
-                tooltip: '均一線',
-                selected: selected == ToolType.pen,
-                onTap: () => drawing.setTool(ToolType.pen),
-              ),
-              const SizedBox(height: 8),
-              _ToolButton(
-                label: 'T',
-                tooltip: '筆圧線',
-                selected: selected == ToolType.pressure,
-                onTap: () => drawing.setTool(ToolType.pressure),
-              ),
-              const SizedBox(height: 8),
-              _ToolButton(
-                label: 'E',
-                tooltip: '消しゴム',
-                selected: selected == ToolType.eraser,
-                onTap: () => drawing.setTool(ToolType.eraser),
-              ),
-              const SizedBox(height: 12),
-              _ToolButton(
-                icon: Icons.gesture,
-                tooltip: 'なげなわ',
-                selected: selected == ToolType.lasso,
-                onTap: () => drawing.setTool(ToolType.lasso),
-              ),
-            ],
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _ToolButton(
+                  label: 'P',
+                  tooltip: 'Pen',
+                  selected: selected == ToolType.pen,
+                  onTap: () => drawing.setTool(ToolType.pen),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: 'T',
+                  tooltip: 'Pressure pen',
+                  selected: selected == ToolType.pressure,
+                  onTap: () => drawing.setTool(ToolType.pressure),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: 'E',
+                  tooltip: 'Eraser',
+                  selected: selected == ToolType.eraser,
+                  onTap: () => drawing.setTool(ToolType.eraser),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: 'L',
+                  tooltip: 'Line',
+                  selected: selected == ToolType.line,
+                  onTap: () => drawing.setTool(ToolType.line),
+                ),
+                const Divider(height: 20),
+                _ToolButton(
+                  label: '□',
+                  tooltip: 'Rectangle',
+                  selected: selected == ToolType.rect,
+                  onTap: () => drawing.setTool(ToolType.rect),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: '■',
+                  tooltip: 'Filled rectangle',
+                  selected: selected == ToolType.fillRect,
+                  onTap: () => drawing.setTool(ToolType.fillRect),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: '○',
+                  tooltip: 'Circle',
+                  selected: selected == ToolType.circle,
+                  onTap: () => drawing.setTool(ToolType.circle),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: '●',
+                  tooltip: 'Filled circle',
+                  selected: selected == ToolType.fillCircle,
+                  onTap: () => drawing.setTool(ToolType.fillCircle),
+                ),
+                const SizedBox(height: 12),
+                _ToolButton(
+                  icon: Icons.gesture,
+                  tooltip: 'Lasso select',
+                  selected: selected == ToolType.lasso,
+                  onTap: () => drawing.setTool(ToolType.lasso),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -73,7 +111,10 @@ class _ToolButton extends StatelessWidget {
     final child = Center(
       child: icon != null
           ? Icon(icon, size: 18, color: Colors.black87)
-          : Text(label ?? '', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          : Text(
+              label ?? '',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
     );
 
     return Tooltip(
@@ -81,7 +122,10 @@ class _ToolButton extends StatelessWidget {
       child: Material(
         color: selected ? Colors.white : Colors.grey.shade300,
         shape: RoundedRectangleBorder(
-          side: BorderSide(color: selected ? Colors.black : Colors.grey.shade500, width: 2),
+          side: BorderSide(
+            color: selected ? Colors.black : Colors.grey.shade500,
+            width: 2,
+          ),
           borderRadius: BorderRadius.circular(6),
         ),
         child: InkWell(

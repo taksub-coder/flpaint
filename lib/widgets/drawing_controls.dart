@@ -16,12 +16,14 @@ class DrawingControls extends StatelessWidget {
             children: [
               const Text('太さ'),
               Expanded(
-                child: Slider(
-                  value: drawing.strokeWidth,
-                  min: 1,
-                  max: 40,
-                  onChanged: drawing.setStrokeWidth,
-                ),
+            child: Slider(
+              value: drawing.strokeWidth,
+              min: 1,
+              max: 40,
+              divisions: 39,
+              label: drawing.strokeWidth.toStringAsFixed(0),
+              onChanged: drawing.setStrokeWidth,
+            ),
               ),
               Text(drawing.strokeWidth.toStringAsFixed(1)),
             ],
