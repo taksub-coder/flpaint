@@ -166,7 +166,7 @@ class _MyHomePageState extends State<MyHomePage> {
             // 固定スライダーパネル
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
               decoration: BoxDecoration(
                 color: Colors.white,
                 boxShadow: [

@@ -14,14 +14,14 @@ class DrawingControls extends StatelessWidget {
         final layerASliderValue = (1.0 - drawing.layerAOpacity) * 100.0;
         final layerBSliderValue = (1.0 - drawing.layerBOpacity) * 100.0;
 
-        return Padding(
-          padding: const EdgeInsets.all(12.0),
+        return SizedBox(
+          height: 82,
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     _SliderRow(
                       symbol: 'P',
@@ -31,7 +31,7 @@ class DrawingControls extends StatelessWidget {
                       divisions: 29,
                       onChanged: drawing.setPenStrokeWidth,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 2),
                     _SliderRow(
                       symbol: 'E',
                       value: drawing.eraserWidth,
@@ -43,23 +43,23 @@ class DrawingControls extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               SizedBox(
-                width: 150,
+                width: 132,
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     _LayerRowButtons(
-                      label: 'Layer A',
+                      label: 'レイヤーA',
                       selected: drawing.activeLayer == DrawingLayer.layerA,
                       visible: drawing.isLayerAVisible,
                       onSelect: () => drawing.setActiveLayer(DrawingLayer.layerA),
                       onToggleVisible: (value) =>
                           drawing.setLayerVisibility(DrawingLayer.layerA, value),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 2),
                     _LayerRowButtons(
-                      label: 'Layer B',
+                      label: 'レイヤーB',
                       selected: drawing.activeLayer == DrawingLayer.layerB,
                       visible: drawing.isLayerBVisible,
                       onSelect: () => drawing.setActiveLayer(DrawingLayer.layerB),
@@ -69,10 +69,10 @@ class DrawingControls extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               Expanded(
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     _SliderRow(
                       symbol: 'A',
@@ -86,7 +86,7 @@ class DrawingControls extends StatelessWidget {
                       ),
                       valueText: '${(100.0 - layerASliderValue).round()}',
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 2),
                     _SliderRow(
                       symbol: 'B',
                       value: layerBSliderValue,
@@ -131,33 +131,44 @@ class _SliderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 20,
-          child: Text(
-            symbol,
-            style: const TextStyle(fontSize: 24, color: Color(0xFF6F6A22)),
+    return SizedBox(
+      height: 36,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 14,
+            child: Text(
+              symbol,
+              style: const TextStyle(fontSize: 28, color: Color(0xFF6F6A22), height: 1.0),
+            ),
           ),
-        ),
-        Expanded(
-          child: Slider(
-            value: value.clamp(min, max).toDouble(),
-            min: min,
-            max: max,
-            divisions: divisions,
-            label: (valueText ?? value.toStringAsFixed(0)),
-            onChanged: onChanged,
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                overlayShape: SliderComponentShape.noOverlay,
+              ),
+              child: Slider(
+                value: value.clamp(min, max).toDouble(),
+                min: min,
+                max: max,
+                divisions: divisions,
+                label: (valueText ?? value.toStringAsFixed(0)),
+                onChanged: onChanged,
+              ),
+            ),
           ),
-        ),
-        SizedBox(
-          width: 40,
-          child: Text(
-            valueText ?? value.toStringAsFixed(1),
-            textAlign: TextAlign.right,
+          SizedBox(
+            width: 32,
+            child: Text(
+              valueText ?? value.toStringAsFixed(1),
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 12),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -179,35 +190,38 @@ class _LayerRowButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selectForeground = selected ? Colors.black : Colors.white;
-    final selectBackground = selected ? Colors.white : Colors.black;
+    final selectForeground = selected ? Colors.white : Colors.black;
+    final selectBackground = selected ? Colors.black : Colors.white;
 
     return Row(
       children: [
         Expanded(
           child: SizedBox(
-            height: 32,
+            height: 30,
             child: OutlinedButton(
               onPressed: onSelect,
               style: OutlinedButton.styleFrom(
                 backgroundColor: selectBackground,
                 foregroundColor: selectForeground,
                 side: const BorderSide(color: Colors.black, width: 2),
-                padding: const EdgeInsets.symmetric(horizontal: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
                 shape: const RoundedRectangleBorder(),
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               child: Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
               ),
             ),
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 2),
         SizedBox(
-          width: 56,
-          height: 32,
+          width: 46,
+          height: 30,
           child: OutlinedButton(
             onPressed: () => onToggleVisible(!visible),
             style: OutlinedButton.styleFrom(
@@ -216,8 +230,13 @@ class _LayerRowButtons extends StatelessWidget {
               side: const BorderSide(color: Colors.black, width: 2),
               padding: const EdgeInsets.symmetric(horizontal: 0),
               shape: const RoundedRectangleBorder(),
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: Text(visible ? 'ON' : 'OFF'),
+            child: Text(
+              visible ? 'ON' : 'OFF',
+              style: const TextStyle(fontSize: 11),
+            ),
           ),
         ),
       ],
