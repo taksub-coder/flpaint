@@ -71,7 +71,6 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   final TransformationController _transformationController = TransformationController();
   bool _panelSecondaryPointerDown = false;
-  Offset? _panelPanZoomStartWindowPosition;
   bool _panelPanZoomTracking = false;
 
   @override
@@ -98,6 +97,9 @@ class _MyHomePageState extends State<MyHomePage> {
   void _onPanelPointerDown(PointerDownEvent event) {
     _panelSecondaryPointerDown =
         (event.buttons & kSecondaryMouseButton) != 0;
+    if (_panelSecondaryPointerDown) {
+      windowManager.startDragging();
+    }
   }
 
   void _onPanelPointerMove(PointerMoveEvent event) {
@@ -116,21 +118,20 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _onPanelPanZoomStart(PointerPanZoomStartEvent event) {
     _panelPanZoomTracking = true;
-    windowManager.getPosition().then((position) {
-      if (!_panelPanZoomTracking) return;
-      _panelPanZoomStartWindowPosition = position;
-    });
   }
 
   void _onPanelPanZoomUpdate(PointerPanZoomUpdateEvent event) {
-    final start = _panelPanZoomStartWindowPosition;
-    if (start == null) return;
-    windowManager.setPosition(start + event.pan);
+    if (!_panelPanZoomTracking) return;
+    final delta = event.panDelta;
+    if (delta == Offset.zero) return;
+    windowManager.getPosition().then((position) {
+      if (!_panelPanZoomTracking) return;
+      windowManager.setPosition(position + delta);
+    });
   }
 
   void _onPanelPanZoomEnd(PointerPanZoomEndEvent event) {
     _panelPanZoomTracking = false;
-    _panelPanZoomStartWindowPosition = null;
   }
 
   Widget _buildWindowMovablePanel({required Widget child}) {
@@ -152,7 +153,10 @@ class _MyHomePageState extends State<MyHomePage> {
     final drawingProvider = context.read<DrawingProvider>();
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: _buildWindowMovablePanel(
+          child: AppBar(
         title: const Text('Drawing App'),
         actions: [
           IconButton(icon: const Icon(Icons.undo), onPressed: drawingProvider.undo),
@@ -165,6 +169,8 @@ class _MyHomePageState extends State<MyHomePage> {
             },
           ),
         ],
+          ),
+        ),
       ),
       body: SafeArea(
         child: Column(
@@ -224,7 +230,7 @@ class _MyHomePageState extends State<MyHomePage> {
             _buildWindowMovablePanel(
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+                padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 7),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   boxShadow: [

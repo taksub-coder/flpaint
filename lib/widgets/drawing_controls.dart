@@ -43,9 +43,9 @@ class DrawingControls extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 7),
               SizedBox(
-                width: 132,
+                width: 112,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -139,7 +139,7 @@ class _SliderRow extends StatelessWidget {
             width: 14,
             child: Text(
               symbol,
-              style: const TextStyle(fontSize: 28, color: Color(0xFF6F6A22), height: 1.0),
+              style: const TextStyle(fontSize: 14, color: Color(0xFF6F6A22), height: 1.0),
             ),
           ),
           Expanded(
@@ -159,12 +159,15 @@ class _SliderRow extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(
-            width: 32,
-            child: Text(
-              valueText ?? value.toStringAsFixed(1),
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 12),
+          Transform.translate(
+            offset: const Offset(-12, 0),
+            child: SizedBox(
+              width: 32,
+              child: Text(
+                valueText ?? value.toStringAsFixed(1),
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 12),
+              ),
             ),
           ),
         ],
@@ -195,32 +198,31 @@ class _LayerRowButtons extends StatelessWidget {
 
     return Row(
       children: [
-        Expanded(
-          child: SizedBox(
-            height: 30,
-            child: OutlinedButton(
-              onPressed: onSelect,
-              style: OutlinedButton.styleFrom(
-                backgroundColor: selectBackground,
-                foregroundColor: selectForeground,
-                side: const BorderSide(color: Colors.black, width: 2),
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                shape: const RoundedRectangleBorder(),
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
+        SizedBox(
+          width: 76,
+          height: 30,
+          child: OutlinedButton(
+            onPressed: onSelect,
+            style: OutlinedButton.styleFrom(
+              backgroundColor: selectBackground,
+              foregroundColor: selectForeground,
+              side: const BorderSide(color: Colors.black, width: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 1),
+              shape: const RoundedRectangleBorder(),
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11),
             ),
           ),
         ),
-        const SizedBox(width: 2),
+        const SizedBox(width: 1),
         SizedBox(
-          width: 46,
+          width: 34,
           height: 30,
           child: OutlinedButton(
             onPressed: () => onToggleVisible(!visible),
@@ -235,7 +237,7 @@ class _LayerRowButtons extends StatelessWidget {
             ),
             child: Text(
               visible ? 'ON' : 'OFF',
-              style: const TextStyle(fontSize: 11),
+              style: const TextStyle(fontSize: 10),
             ),
           ),
         ),
