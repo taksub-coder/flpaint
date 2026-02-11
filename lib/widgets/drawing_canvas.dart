@@ -633,7 +633,8 @@ class DrawingPainter extends CustomPainter {
     return tool == ToolType.rect ||
         tool == ToolType.fillRect ||
         tool == ToolType.circle ||
-        tool == ToolType.fillCircle;
+        tool == ToolType.fillCircle ||
+        tool == ToolType.line;
   }
 
   void _drawShapeGuide(Canvas canvas, ToolType tool, Offset start, Offset end) {
@@ -647,6 +648,11 @@ class DrawingPainter extends CustomPainter {
       case ToolType.circle:
       case ToolType.fillCircle:
         path.addOval(rect);
+        break;
+      case ToolType.line:
+        path
+          ..moveTo(start.dx, start.dy)
+          ..lineTo(end.dx, end.dy);
         break;
       default:
         return;

@@ -70,6 +70,9 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   final TransformationController _transformationController = TransformationController();
+  bool _panelSecondaryPointerDown = false;
+  Offset? _panelPanZoomStartWindowPosition;
+  bool _panelPanZoomTracking = false;
 
   @override
   void initState() {
@@ -90,6 +93,58 @@ class _MyHomePageState extends State<MyHomePage> {
   void dispose() {
     _transformationController.dispose();
     super.dispose();
+  }
+
+  void _onPanelPointerDown(PointerDownEvent event) {
+    _panelSecondaryPointerDown =
+        (event.buttons & kSecondaryMouseButton) != 0;
+  }
+
+  void _onPanelPointerMove(PointerMoveEvent event) {
+    if (!_panelSecondaryPointerDown) return;
+    if ((event.buttons & kSecondaryMouseButton) == 0) {
+      _panelSecondaryPointerDown = false;
+      return;
+    }
+    _panelSecondaryPointerDown = false;
+    windowManager.startDragging();
+  }
+
+  void _onPanelPointerUp(PointerEvent event) {
+    _panelSecondaryPointerDown = false;
+  }
+
+  void _onPanelPanZoomStart(PointerPanZoomStartEvent event) {
+    _panelPanZoomTracking = true;
+    windowManager.getPosition().then((position) {
+      if (!_panelPanZoomTracking) return;
+      _panelPanZoomStartWindowPosition = position;
+    });
+  }
+
+  void _onPanelPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    final start = _panelPanZoomStartWindowPosition;
+    if (start == null) return;
+    windowManager.setPosition(start + event.pan);
+  }
+
+  void _onPanelPanZoomEnd(PointerPanZoomEndEvent event) {
+    _panelPanZoomTracking = false;
+    _panelPanZoomStartWindowPosition = null;
+  }
+
+  Widget _buildWindowMovablePanel({required Widget child}) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _onPanelPointerDown,
+      onPointerMove: _onPanelPointerMove,
+      onPointerUp: _onPanelPointerUp,
+      onPointerCancel: _onPanelPointerUp,
+      onPointerPanZoomStart: _onPanelPanZoomStart,
+      onPointerPanZoomUpdate: _onPanelPanZoomUpdate,
+      onPointerPanZoomEnd: _onPanelPanZoomEnd,
+      child: child,
+    );
   }
 
   @override
@@ -152,28 +207,32 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                   ),
                   // 固定サイドバー
-                  Container(
-                    width: 70,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      border: Border(left: BorderSide(color: Colors.grey[300]!)),
+                  _buildWindowMovablePanel(
+                    child: Container(
+                      width: 70,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        border: Border(left: BorderSide(color: Colors.grey[300]!)),
+                      ),
+                      child: const ToolSidebar(),
                     ),
-                    child: const ToolSidebar(),
                   ),
                 ],
               ),
             ),
             // 固定スライダーパネル
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withAlpha(20), blurRadius: 4, offset: const Offset(0, -2))
-                ],
+            _buildWindowMovablePanel(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withAlpha(20), blurRadius: 4, offset: const Offset(0, -2))
+                  ],
+                ),
+                child: const DrawingControls(),
               ),
-              child: const DrawingControls(),
             ),
           ],
         ),
