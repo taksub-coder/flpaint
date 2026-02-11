@@ -70,6 +70,7 @@ class Point {
 class LassoSelection {
   final Image image;
   final Path maskPath;
+  final DrawingLayer layer;
   Rect baseRect;
   Offset translation;
   double scaleX;
@@ -79,6 +80,7 @@ class LassoSelection {
   LassoSelection({
     required this.image,
     required this.maskPath,
+    required this.layer,
     required this.baseRect,
     this.translation = Offset.zero,
     this.scaleX = 1.0,

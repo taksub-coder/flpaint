@@ -9,12 +9,14 @@ import '../models/drawing.dart';
 
 class _DrawingSnapshot {
   final List<DrawnLine> lines;
-  final ui.Image? baseImage;
+  final ui.Image? layerABaseImage;
+  final ui.Image? layerBBaseImage;
   final LassoSelection? selection;
 
   _DrawingSnapshot({
     required this.lines,
-    required this.baseImage,
+    required this.layerABaseImage,
+    required this.layerBBaseImage,
     required this.selection,
   });
 }
@@ -34,7 +36,8 @@ class DrawingProvider extends ChangeNotifier {
   double _layerBOpacity = 1.0;
   // Eraser passes: alternate between half-transparent and full erase per drag
   bool _nextEraserFullErase = false;
-  ui.Image? _baseImage;
+  ui.Image? _layerABaseImage;
+  ui.Image? _layerBBaseImage;
   Size _canvasSize = Size.zero;
 
   // Lasso
@@ -65,7 +68,8 @@ class DrawingProvider extends ChangeNotifier {
   bool get isLayerBVisible => _isLayerBVisible;
   double get layerAOpacity => _layerAOpacity;
   double get layerBOpacity => _layerBOpacity;
-  ui.Image? get baseImage => _baseImage;
+  ui.Image? get layerABaseImage => _layerABaseImage;
+  ui.Image? get layerBBaseImage => _layerBBaseImage;
   List<Offset> get lassoDraft => List.unmodifiable(_lassoPoints);
   bool get isDrawingLasso => _isDrawingLasso;
   LassoSelection? get selection => _selection;
@@ -159,12 +163,29 @@ class DrawingProvider extends ChangeNotifier {
     _lassoPoints.clear();
     _isDrawingLasso = false;
     _selection = null;
-    _baseImage = null;
+    _layerABaseImage = null;
+    _layerBBaseImage = null;
     _shapeStart = null;
     _shapeEnd = null;
     _undoStack.clear();
     _redoStack.clear();
     notifyListeners();
+  }
+
+  ui.Image? _getLayerBaseImage(DrawingLayer layer) {
+    return layer == DrawingLayer.layerA ? _layerABaseImage : _layerBBaseImage;
+  }
+
+  void _setLayerBaseImage(DrawingLayer layer, ui.Image? image) {
+    if (layer == DrawingLayer.layerA) {
+      _layerABaseImage = image;
+    } else {
+      _layerBBaseImage = image;
+    }
+  }
+
+  void _clearLayerLines(DrawingLayer layer) {
+    _lines.removeWhere((line) => line.layer == layer);
   }
   void _terminateLassoSession() {
     if (_isDrawingLasso) {
@@ -272,7 +293,8 @@ class DrawingProvider extends ChangeNotifier {
   _DrawingSnapshot _createSnapshot() {
     return _DrawingSnapshot(
       lines: List<DrawnLine>.from(_lines.map(_cloneLine)),
-      baseImage: _baseImage,
+      layerABaseImage: _layerABaseImage,
+      layerBBaseImage: _layerBBaseImage,
       selection: _cloneSelection(_selection),
     );
   }
@@ -281,7 +303,8 @@ class DrawingProvider extends ChangeNotifier {
     _lines
       ..clear()
       ..addAll(snapshot.lines.map(_cloneLine));
-    _baseImage = snapshot.baseImage;
+    _layerABaseImage = snapshot.layerABaseImage;
+    _layerBBaseImage = snapshot.layerBBaseImage;
     _selection = _cloneSelection(snapshot.selection);
   }
 
@@ -313,6 +336,7 @@ class DrawingProvider extends ChangeNotifier {
     return LassoSelection(
       image: src.image,
       maskPath: clonedPath,
+      layer: src.layer,
       baseRect: Rect.fromLTWH(
         src.baseRect.left,
         src.baseRect.top,
@@ -586,28 +610,31 @@ class DrawingProvider extends ChangeNotifier {
       return;
     }
 
-    final ui.Image source = await _renderBaseAndLines(size);
+    final DrawingLayer layer = _activeLayer;
+    final ui.Image source = await _renderLayerBaseAndLines(size, layer);
     final ui.Image selectionImage = await _extractSelection(source, path, bounds);
     final ui.Image background = await _eraseSelection(source, path, size);
 
-    _baseImage = background;
-    _lines.clear();
+    _setLayerBaseImage(layer, background);
+    _clearLayerLines(layer);
     _selection = LassoSelection(
       image: selectionImage,
       maskPath: path,
+      layer: layer,
       baseRect: bounds,
     );
     notifyListeners();
   }
 
-  Future<ui.Image> _renderBaseAndLines(Size size) async {
+  Future<ui.Image> _renderLayerBaseAndLines(Size size, DrawingLayer layer) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
-    if (_baseImage != null) {
-      canvas.drawImage(_baseImage!, Offset.zero, Paint());
+    final layerBaseImage = _getLayerBaseImage(layer);
+    if (layerBaseImage != null) {
+      canvas.drawImage(layerBaseImage, Offset.zero, Paint());
     }
-    _drawLines(canvas, size);
+    _drawLines(canvas, size, layer: layer);
     final picture = recorder.endRecording();
     return picture.toImage(size.width.ceil(), size.height.ceil());
   }
@@ -747,22 +774,24 @@ class DrawingProvider extends ChangeNotifier {
   Future<void> commitSelection() async {
     if (_selection == null || _canvasSize == Size.zero) return;
     _saveState();
-    final ui.Image merged = await _renderWithSelection(_canvasSize);
-    _baseImage = merged;
+    final DrawingLayer layer = _selection!.layer;
+    final ui.Image merged = await _renderLayerWithSelection(_canvasSize, layer);
+    _setLayerBaseImage(layer, merged);
     _selection = null;
-    _lines.clear();
+    _clearLayerLines(layer);
     notifyListeners();
   }
 
-  Future<ui.Image> _renderWithSelection(Size size) async {
+  Future<ui.Image> _renderLayerWithSelection(Size size, DrawingLayer layer) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
-    if (_baseImage != null) {
-      canvas.drawImage(_baseImage!, Offset.zero, Paint());
+    final layerBaseImage = _getLayerBaseImage(layer);
+    if (layerBaseImage != null) {
+      canvas.drawImage(layerBaseImage, Offset.zero, Paint());
     }
-    _drawLines(canvas, size);
-    if (_selection != null) {
+    _drawLines(canvas, size, layer: layer);
+    if (_selection != null && _selection!.layer == layer) {
       _paintSelection(canvas, _selection!);
     }
     final picture = recorder.endRecording();
@@ -770,13 +799,14 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   // Painting helpers shared with CustomPainter and off-screen rendering
-  void _drawLines(Canvas canvas, Size size) {
+  void _drawLines(Canvas canvas, Size size, {DrawingLayer? layer}) {
     final paint = Paint()
       ..isAntiAlias = true
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
 
     for (final line in _lines) {
+      if (layer != null && line.layer != layer) continue;
       paint
         ..color = line.color.withValues(alpha: line.eraserAlpha)
         ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver

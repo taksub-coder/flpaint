@@ -48,7 +48,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   isLayerBVisible: drawing.isLayerBVisible,
                   layerAOpacity: drawing.layerAOpacity,
                   layerBOpacity: drawing.layerBOpacity,
-                  baseImage: drawing.baseImage,
+                  layerABaseImage: drawing.layerABaseImage,
+                  layerBBaseImage: drawing.layerBBaseImage,
                   selection: drawing.selection,
                   lassoDraft: drawing.lassoDraft,
                   isDrawingLasso: drawing.isDrawingLasso,
@@ -283,7 +284,8 @@ class DrawingPainter extends CustomPainter {
   final bool isLayerBVisible;
   final double layerAOpacity;
   final double layerBOpacity;
-  final ui.Image? baseImage;
+  final ui.Image? layerABaseImage;
+  final ui.Image? layerBBaseImage;
   final LassoSelection? selection;
   final List<Offset> lassoDraft;
   final bool isDrawingLasso;
@@ -299,7 +301,8 @@ class DrawingPainter extends CustomPainter {
     required this.isLayerBVisible,
     required this.layerAOpacity,
     required this.layerBOpacity,
-    required this.baseImage,
+    required this.layerABaseImage,
+    required this.layerBBaseImage,
     required this.selection,
     required this.lassoDraft,
     required this.isDrawingLasso,
@@ -314,12 +317,10 @@ class DrawingPainter extends CustomPainter {
     // ★ ここを削除（またはコメントアウト） ★
     // canvas.drawColor(Colors.white, BlendMode.srcOver);
 
-    if (baseImage != null) {
-      canvas.drawImage(baseImage!, Offset.zero, Paint());
-    }
     _drawLayer(
       canvas,
       size,
+      layerABaseImage,
       layerALines,
       isVisible: isLayerAVisible,
       opacity: layerAOpacity,
@@ -327,14 +328,25 @@ class DrawingPainter extends CustomPainter {
     _drawLayer(
       canvas,
       size,
+      layerBBaseImage,
       layerBLines,
       isVisible: isLayerBVisible,
       opacity: layerBOpacity,
     );
 
     if (selection != null) {
-      _paintSelection(canvas, selection!);
-      _paintSelectionOverlay(canvas, selection!, handles);
+      final bool inLayerA = selection!.layer == DrawingLayer.layerA;
+      final bool selectionVisible = inLayerA ? isLayerAVisible : isLayerBVisible;
+      final double selectionOpacity = inLayerA ? layerAOpacity : layerBOpacity;
+      if (selectionVisible && selectionOpacity > 0) {
+        canvas.saveLayer(
+          Rect.fromLTWH(0, 0, size.width, size.height),
+          Paint()..color = Colors.white.withValues(alpha: selectionOpacity),
+        );
+        _paintSelection(canvas, selection!);
+        canvas.restore();
+        _paintSelectionOverlay(canvas, selection!, handles);
+      }
     }
     if (isDrawingLasso && lassoDraft.length > 1) {
       _drawLassoDraft(canvas);
@@ -347,6 +359,7 @@ class DrawingPainter extends CustomPainter {
   void _drawLayer(
     Canvas canvas,
     Size size,
+    ui.Image? baseImage,
     List<DrawnLine> lines, {
     required bool isVisible,
     required double opacity,
@@ -356,6 +369,9 @@ class DrawingPainter extends CustomPainter {
       Rect.fromLTWH(0, 0, size.width, size.height),
       Paint()..color = Colors.white.withValues(alpha: opacity),
     );
+    if (baseImage != null) {
+      canvas.drawImage(baseImage, Offset.zero, Paint());
+    }
     _drawLines(canvas, lines);
     canvas.restore();
   }
