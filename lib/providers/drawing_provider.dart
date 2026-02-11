@@ -1,9 +1,13 @@
 ﻿//flpaint_プロトタイプ1.2d_筆圧第一次完成版
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:image/image.dart' as img;
 
 import '../models/drawing.dart';
 
@@ -85,6 +89,7 @@ class DrawingProvider extends ChangeNotifier {
   // Distance-based taper lengths (speed-clamped)筆足
   static const double _pressureTaperInBase = 14.0;
   static const double _pressureTaperOutBase = 14.0;
+  static const Size _ioCanvasSize = Size(768, 1024);
   DateTime? _lastPointTime;
   double _lastSpeed = 0.0; // px/ms for current stroke
 
@@ -154,6 +159,186 @@ class DrawingProvider extends ChangeNotifier {
         break;
     }
     notifyListeners();
+  }
+
+  Future<void> importImageFromDialog() async {
+    final XFile? file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'Image',
+          extensions: ['png', 'jpg', 'jpeg'],
+        ),
+      ],
+    );
+    if (file == null) return;
+    final Uint8List bytes = await file.readAsBytes();
+    if (bytes.isEmpty) return;
+
+    if (_selection != null &&
+        _selection!.layer == _activeLayer &&
+        _canvasSize != Size.zero) {
+      await commitSelection();
+    }
+
+    _saveState();
+    final ui.Codec codec = await ui.instantiateImageCodec(bytes);
+    final ui.FrameInfo frame = await codec.getNextFrame();
+    codec.dispose();
+
+    final ui.Image fitted = await _fitImportedImageToCanvas(
+      frame.image,
+      _ioCanvasSize,
+    );
+    final ui.Image merged = await _mergeImageIntoLayerBase(
+      _activeLayer,
+      fitted,
+      _ioCanvasSize,
+    );
+    _setLayerBaseImage(_activeLayer, merged);
+    notifyListeners();
+  }
+
+  Future<void> exportImageFromDialog() async {
+    final FileSaveLocation? location = await getSaveLocation(
+      suggestedName: 'flpaint.png',
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'PNG',
+          extensions: ['png'],
+        ),
+        XTypeGroup(
+          label: 'JPEG',
+          extensions: ['jpg', 'jpeg'],
+        ),
+      ],
+    );
+    if (location == null) return;
+    final String savePath = _normalizeExportPath(location.path);
+    final String lower = savePath.toLowerCase();
+    final bool exportJpeg = lower.endsWith('.jpg') || lower.endsWith('.jpeg');
+
+    final ui.Image merged = await _renderExportImage(_ioCanvasSize);
+    final Uint8List? encoded = await _encodeExportImage(
+      merged,
+      exportJpeg: exportJpeg,
+    );
+    if (encoded == null) return;
+    await File(savePath).writeAsBytes(encoded, flush: true);
+  }
+
+  Future<ui.Image> _fitImportedImageToCanvas(ui.Image source, Size canvasSize) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+
+    final double srcW = source.width.toDouble();
+    final double srcH = source.height.toDouble();
+    final double scale = math.min(
+      1.0,
+      math.min(canvasSize.width / srcW, canvasSize.height / srcH),
+    );
+    final Rect srcRect = Rect.fromLTWH(0, 0, srcW, srcH);
+    final Rect dstRect = Rect.fromLTWH(0, 0, srcW * scale, srcH * scale);
+    canvas.drawImageRect(source, srcRect, dstRect, Paint());
+
+    final picture = recorder.endRecording();
+    return picture.toImage(canvasSize.width.ceil(), canvasSize.height.ceil());
+  }
+
+  Future<ui.Image> _mergeImageIntoLayerBase(
+    DrawingLayer layer,
+    ui.Image importImage,
+    Size canvasSize,
+  ) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+    final layerBase = _getLayerBaseImage(layer);
+    if (layerBase != null) {
+      canvas.drawImage(layerBase, Offset.zero, Paint());
+    }
+    canvas.drawImage(importImage, Offset.zero, Paint());
+    final picture = recorder.endRecording();
+    return picture.toImage(canvasSize.width.ceil(), canvasSize.height.ceil());
+  }
+
+  Future<ui.Image> _renderExportImage(Size size) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+
+    if (_isLayerAVisible && _layerAOpacity > 0) {
+      _paintLayerCompositeForExport(
+        canvas,
+        size,
+        DrawingLayer.layerA,
+        _layerAOpacity,
+      );
+    }
+    if (_isLayerBVisible && _layerBOpacity > 0) {
+      _paintLayerCompositeForExport(
+        canvas,
+        size,
+        DrawingLayer.layerB,
+        _layerBOpacity,
+      );
+    }
+
+    final picture = recorder.endRecording();
+    return picture.toImage(size.width.ceil(), size.height.ceil());
+  }
+
+  void _paintLayerCompositeForExport(
+    Canvas canvas,
+    Size size,
+    DrawingLayer layer,
+    double opacity,
+  ) {
+    canvas.saveLayer(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = Colors.white.withValues(alpha: opacity),
+    );
+    final layerBase = _getLayerBaseImage(layer);
+    if (layerBase != null) {
+      canvas.drawImage(layerBase, Offset.zero, Paint());
+    }
+    _drawLines(canvas, size, layer: layer);
+    if (_selection != null && _selection!.layer == layer) {
+      _paintSelection(canvas, _selection!);
+    }
+    canvas.restore();
+  }
+
+  Future<Uint8List?> _encodeExportImage(
+    ui.Image image, {
+    required bool exportJpeg,
+  }) async {
+    if (!exportJpeg) {
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      return data?.buffer.asUint8List();
+    }
+
+    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    if (data == null) return null;
+    final converted = img.Image.fromBytes(
+      width: image.width,
+      height: image.height,
+      bytes: data.buffer,
+      numChannels: 4,
+      order: img.ChannelOrder.rgba,
+    );
+    final jpegBytes = img.encodeJpg(converted, quality: 95);
+    return Uint8List.fromList(jpegBytes);
+  }
+
+  String _normalizeExportPath(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg')) {
+      return path;
+    }
+    return '$path.png';
   }
 
   void clear() {

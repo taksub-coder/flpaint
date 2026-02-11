@@ -13,6 +13,8 @@ dependencies:
   provider: ^6.0.5 # 状態管理のために追加
 # ... 他の依存があればここに
   window_manager: ^0.3.9  # 最新版は pub.dev で確認（2026年現在 ^0.5.x 系が安定）
+  file_selector: ^1.0.3
+  image: ^4.2.0
 
 dev_dependencies:
   flutter_test:
