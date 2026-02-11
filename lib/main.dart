@@ -17,7 +17,7 @@ void main() async {
   // ウィンドウオプションを設定
   WindowOptions windowOptions = const WindowOptions(
     size: Size(838, 980),           // キャンバス768 + サイドバー70 + 余裕
-    minimumSize: Size(600, 800),
+    minimumSize: Size(480, 800),
     maximumSize: Size(3000, 3000),   // 必要に応じて大きく
     center: true,
     backgroundColor: Colors.transparent,
@@ -30,7 +30,7 @@ void main() async {
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     // 追加でサイズを確実に適用（最新版で安定する書き方）
     await windowManager.setSize(const Size(838, 980));
-    await windowManager.setMinimumSize(const Size(600, 800));
+    await windowManager.setMinimumSize(const Size(480, 800));
     await windowManager.center();
     await windowManager.show();
     await windowManager.focus();
