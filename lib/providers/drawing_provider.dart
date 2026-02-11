@@ -25,7 +25,13 @@ class DrawingProvider extends ChangeNotifier {
   Offset? _lineStartPoint;
 
   double _strokeWidth = 5.0;
+  double _eraserWidth = 5.0;
   ToolType _tool = ToolType.pen;
+  DrawingLayer _activeLayer = DrawingLayer.layerA;
+  bool _isLayerAVisible = true;
+  bool _isLayerBVisible = true;
+  double _layerAOpacity = 1.0;
+  double _layerBOpacity = 1.0;
   // Eraser passes: alternate between half-transparent and full erase per drag
   bool _nextEraserFullErase = false;
   ui.Image? _baseImage;
@@ -45,8 +51,20 @@ class DrawingProvider extends ChangeNotifier {
   final List<_DrawingSnapshot> _redoStack = [];
 
   List<DrawnLine> get lines => _lines;
+  List<DrawnLine> get layerALines => List<DrawnLine>.unmodifiable(
+        _lines.where((line) => line.layer == DrawingLayer.layerA),
+      );
+  List<DrawnLine> get layerBLines => List<DrawnLine>.unmodifiable(
+        _lines.where((line) => line.layer == DrawingLayer.layerB),
+      );
   double get strokeWidth => _strokeWidth;
+  double get eraserWidth => _eraserWidth;
   ToolType get currentTool => _tool;
+  DrawingLayer get activeLayer => _activeLayer;
+  bool get isLayerAVisible => _isLayerAVisible;
+  bool get isLayerBVisible => _isLayerBVisible;
+  double get layerAOpacity => _layerAOpacity;
+  double get layerBOpacity => _layerBOpacity;
   ui.Image? get baseImage => _baseImage;
   List<Offset> get lassoDraft => List.unmodifiable(_lassoPoints);
   bool get isDrawingLasso => _isDrawingLasso;
@@ -83,11 +101,54 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   void setStrokeWidth(double width) {
+    setPenStrokeWidth(width);
+  }
+
+  void setPenStrokeWidth(double width) {
     // End any active lasso when other controls are used
     if (_tool != ToolType.lasso) {
       _terminateLassoSession();
     }
-    _strokeWidth = width;
+    _strokeWidth = width.clamp(1.0, 30.0).toDouble();
+    notifyListeners();
+  }
+
+  void setEraserWidth(double width) {
+    if (_tool != ToolType.lasso) {
+      _terminateLassoSession();
+    }
+    _eraserWidth = width.clamp(1.0, 30.0).toDouble();
+    notifyListeners();
+  }
+
+  void setActiveLayer(DrawingLayer layer) {
+    if (_activeLayer == layer) return;
+    _activeLayer = layer;
+    notifyListeners();
+  }
+
+  void setLayerVisibility(DrawingLayer layer, bool isVisible) {
+    switch (layer) {
+      case DrawingLayer.layerA:
+        _isLayerAVisible = isVisible;
+        break;
+      case DrawingLayer.layerB:
+        _isLayerBVisible = isVisible;
+        break;
+    }
+    notifyListeners();
+  }
+
+  void setLayerOpacity(DrawingLayer layer, double opacity) {
+    final clamped = opacity.clamp(0.0, 1.0).toDouble();
+    switch (layer) {
+      case DrawingLayer.layerA:
+        _layerAOpacity = clamped;
+        break;
+      case DrawingLayer.layerB:
+        _layerBOpacity = clamped;
+        break;
+    }
     notifyListeners();
   }
 
@@ -234,6 +295,7 @@ class DrawingProvider extends ChangeNotifier {
       isEraser: src.isEraser,
       eraserAlpha: src.eraserAlpha,
       isFinished: src.isFinished,
+      layer: src.layer,
       shapeRect: src.shapeRect == null
           ? null
           : Rect.fromLTWH(
@@ -277,6 +339,8 @@ class DrawingProvider extends ChangeNotifier {
 
     _lineStartPoint = startPoint;
     final bool isEraserStroke = _tool == ToolType.eraser;
+    final double activeStrokeWidth =
+        isEraserStroke ? _eraserWidth : _strokeWidth;
     const color = Colors.black;
     // Pressure uses pseudo-pen dynamics; others keep fixed width.
     final bool variableWidth = _tool == ToolType.pressure;
@@ -293,16 +357,17 @@ class DrawingProvider extends ChangeNotifier {
       [
         Point(
           startPoint,
-          _tool == ToolType.pressure ? 0.01 : _strokeWidth,
+          _tool == ToolType.pressure ? 0.01 : activeStrokeWidth,
         )
       ],
       color: color,
-      width: _strokeWidth,
+      width: activeStrokeWidth,
       tool: _tool,
       variableWidth: variableWidth,
       isEraser: isEraserStroke,
       eraserAlpha: eraserAlpha,
       isFinished: false,
+      layer: _activeLayer,
     );
     _lines.add(_currentLine!);
     notifyListeners();
@@ -334,10 +399,10 @@ class DrawingProvider extends ChangeNotifier {
   }
   _lastPointTime = now;
 
-  double width = _strokeWidth;
+  double width = _currentLine!.width;
   if (_currentLine!.variableWidth) {
     final speedFactor = (1.0 - 0.1 * _normalizedSpeed()).clamp(0.8, 1.0);
-    final baseWidth = _strokeWidth * speedFactor;
+    final baseWidth = _currentLine!.width * speedFactor;
 
     final distanceFromStart = (smoothedOffset - _lineStartPoint!).distance;
 
@@ -432,6 +497,7 @@ class DrawingProvider extends ChangeNotifier {
       variableWidth: false,
       isEraser: false,
       isFinished: true,
+      layer: _activeLayer,
       shapeRect: rect,
     ));
   }
@@ -445,6 +511,7 @@ class DrawingProvider extends ChangeNotifier {
       variableWidth: false,
       isEraser: false,
       isFinished: true,
+      layer: _activeLayer,
       shapeRect: rect,
     ));
   }
@@ -458,6 +525,7 @@ class DrawingProvider extends ChangeNotifier {
       variableWidth: false,
       isEraser: false,
       isFinished: true,
+      layer: _activeLayer,
     ));
   }
 
@@ -480,6 +548,7 @@ class DrawingProvider extends ChangeNotifier {
       variableWidth: false,
       isEraser: false,
       isFinished: true,
+      layer: _activeLayer,
     ));
   }
 

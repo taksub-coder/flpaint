@@ -75,32 +75,15 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fitToViewport();
+      _alignToTopLeft();
     });
   }
 
-  void _fitToViewport() {
-    final renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox == null || !renderBox.hasSize) return;
-
-    final viewportSize = renderBox.size;
-
-    // キャンバス固定サイズ
-    const canvasWidth = 768.0;
-    const canvasHeight = 1024.0;
-
-    // フィットするためのスケール（幅と高さのうち小さい方を採用してアスペクト比維持）
-    final scaleX = viewportSize.width / canvasWidth;
-    final scaleY = viewportSize.height / canvasHeight;
-    final initialScale = scaleX < scaleY ? scaleX : scaleY;
-
-    // 中央寄せのための平行移動
-    final translationX = (viewportSize.width - canvasWidth * initialScale) / 2;
-    final translationY = (viewportSize.height - canvasHeight * initialScale) / 2;
-
+  void _alignToTopLeft() {
+    // スケール1.0で左上に寄せる（翻訳を0にセット）
     _transformationController.value = Matrix4.identity()
-      ..translate(translationX, translationY)
-      ..scale(initialScale);
+      ..translate(0.0, 0.0)  // 左上座標を(0,0)に固定
+      ..scale(1.0);          // スケールは1.0（キャンバス原寸）
   }
 
   @override
@@ -123,7 +106,7 @@ class _MyHomePageState extends State<MyHomePage> {
             icon: const Icon(Icons.clear),
             onPressed: () {
               drawingProvider.clear();
-              _fitToViewport(); // クリア時もフィット状態に戻す
+              _alignToTopLeft(); // クリア時も左上にリセット
             },
           ),
         ],

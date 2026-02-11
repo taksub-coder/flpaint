@@ -42,7 +42,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               onPanCancel: () => _handlePanEnd(drawing),
               child: CustomPaint(
                 painter: DrawingPainter(
-                  lines: drawing.lines,
+                  layerALines: drawing.layerALines,
+                  layerBLines: drawing.layerBLines,
+                  isLayerAVisible: drawing.isLayerAVisible,
+                  isLayerBVisible: drawing.isLayerBVisible,
+                  layerAOpacity: drawing.layerAOpacity,
+                  layerBOpacity: drawing.layerBOpacity,
                   baseImage: drawing.baseImage,
                   selection: drawing.selection,
                   lassoDraft: drawing.lassoDraft,
@@ -272,7 +277,12 @@ class SelectionDragState {
 }
 
 class DrawingPainter extends CustomPainter {
-  final List<DrawnLine> lines;
+  final List<DrawnLine> layerALines;
+  final List<DrawnLine> layerBLines;
+  final bool isLayerAVisible;
+  final bool isLayerBVisible;
+  final double layerAOpacity;
+  final double layerBOpacity;
   final ui.Image? baseImage;
   final LassoSelection? selection;
   final List<Offset> lassoDraft;
@@ -283,7 +293,12 @@ class DrawingPainter extends CustomPainter {
   final Offset? shapeEnd;
 
   DrawingPainter({
-    required this.lines,
+    required this.layerALines,
+    required this.layerBLines,
+    required this.isLayerAVisible,
+    required this.isLayerBVisible,
+    required this.layerAOpacity,
+    required this.layerBOpacity,
     required this.baseImage,
     required this.selection,
     required this.lassoDraft,
@@ -299,12 +314,23 @@ class DrawingPainter extends CustomPainter {
     // ★ ここを削除（またはコメントアウト） ★
     // canvas.drawColor(Colors.white, BlendMode.srcOver);
 
-    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
     if (baseImage != null) {
       canvas.drawImage(baseImage!, Offset.zero, Paint());
     }
-    _drawLines(canvas, size);
-    canvas.restore();
+    _drawLayer(
+      canvas,
+      size,
+      layerALines,
+      isVisible: isLayerAVisible,
+      opacity: layerAOpacity,
+    );
+    _drawLayer(
+      canvas,
+      size,
+      layerBLines,
+      isVisible: isLayerBVisible,
+      opacity: layerBOpacity,
+    );
 
     if (selection != null) {
       _paintSelection(canvas, selection!);
@@ -318,7 +344,23 @@ class DrawingPainter extends CustomPainter {
     }
   }
 
-  void _drawLines(Canvas canvas, Size size) {
+  void _drawLayer(
+    Canvas canvas,
+    Size size,
+    List<DrawnLine> lines, {
+    required bool isVisible,
+    required double opacity,
+  }) {
+    if (!isVisible || opacity <= 0) return;
+    canvas.saveLayer(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = Colors.white.withValues(alpha: opacity),
+    );
+    _drawLines(canvas, lines);
+    canvas.restore();
+  }
+
+  void _drawLines(Canvas canvas, List<DrawnLine> lines) {
     final paint = Paint()
       ..isAntiAlias = true
       ..strokeCap = StrokeCap.round

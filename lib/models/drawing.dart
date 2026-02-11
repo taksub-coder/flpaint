@@ -16,6 +16,11 @@ enum ToolType {
   lasso,
 }
 
+enum DrawingLayer {
+  layerA,
+  layerB,
+}
+
 enum SelectionHandle {
   none,
   inside,
@@ -40,6 +45,7 @@ class DrawnLine {
   final double eraserAlpha; // 1.0 for normal strokes; 0.5/1.0 for eraser passes
   bool isFinished;
   final Rect? shapeRect;
+  final DrawingLayer layer;
 
   DrawnLine(
     this.points, {
@@ -51,6 +57,7 @@ class DrawnLine {
     this.eraserAlpha = 1.0,
     this.isFinished = false,
     this.shapeRect,
+    this.layer = DrawingLayer.layerA,
   });
 }
 
