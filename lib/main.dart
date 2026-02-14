@@ -1,4 +1,4 @@
-// flpaint_プロトタイプE.2g_描画優先ズーム対応版
+// flpaint_プロトタイプE.2h_IN＿EXP実装版
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/gestures.dart';
