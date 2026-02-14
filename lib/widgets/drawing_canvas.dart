@@ -384,7 +384,7 @@ class DrawingPainter extends CustomPainter {
 
     for (final line in lines) {
       paint
-        ..color = line.color.withValues(alpha: line.eraserAlpha)
+        ..color = _toneAwareLineColor(line).withValues(alpha: line.eraserAlpha)
         ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver;
 
       switch (line.tool) {
@@ -447,6 +447,19 @@ class DrawingPainter extends CustomPainter {
             canvas.drawPath(path, paint);
           }
       }
+    }
+  }
+
+  Color _toneAwareLineColor(DrawnLine line) {
+    switch (line.tool) {
+      case ToolType.tone30:
+        return Colors.grey.shade300;
+      case ToolType.tone60:
+        return Colors.grey.shade600;
+      case ToolType.tone80:
+        return Colors.grey.shade800;
+      default:
+        return line.color;
     }
   }
 

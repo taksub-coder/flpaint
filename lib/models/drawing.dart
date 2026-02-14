@@ -13,6 +13,9 @@ enum ToolType {
   dot30,
   dot60,
   dot80,
+  tone30,
+  tone60,
+  tone80,
   lasso,
 }
 

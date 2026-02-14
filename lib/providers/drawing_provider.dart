@@ -453,6 +453,19 @@ class DrawingProvider extends ChangeNotifier {
     return speedNorm.clamp(0.0, 2.0);
   }
 
+  Color _strokeColorForTool(ToolType tool) {
+    switch (tool) {
+      case ToolType.tone30:
+        return Colors.grey.shade300;
+      case ToolType.tone60:
+        return Colors.grey.shade600;
+      case ToolType.tone80:
+        return Colors.grey.shade800;
+      default:
+        return Colors.black;
+    }
+  }
+
   double _easeOutQuad(double t) => 1 - (1 - t) * (1 - t);
 
   void undo() {
@@ -550,7 +563,7 @@ class DrawingProvider extends ChangeNotifier {
     final bool isEraserStroke = _tool == ToolType.eraser;
     final double activeStrokeWidth =
         isEraserStroke ? _eraserWidth : _strokeWidth;
-    const color = Colors.black;
+    final color = _strokeColorForTool(_tool);
     // Pressure uses pseudo-pen dynamics; others keep fixed width.
     final bool variableWidth = _tool == ToolType.pressure;
     _lastPointTime = DateTime.now();

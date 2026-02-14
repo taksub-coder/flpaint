@@ -84,6 +84,27 @@ class ToolSidebar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _ToolButton(
+                  label: '30',
+                  tooltip: 'Tone 30%',
+                  selected: selected == ToolType.tone30,
+                  onTap: () => drawing.setTool(ToolType.tone30),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: '60',
+                  tooltip: 'Tone 60%',
+                  selected: selected == ToolType.tone60,
+                  onTap: () => drawing.setTool(ToolType.tone60),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: '80',
+                  tooltip: 'Tone 80%',
+                  selected: selected == ToolType.tone80,
+                  onTap: () => drawing.setTool(ToolType.tone80),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
                   label: 'IN',
                   tooltip: 'Import image',
                   selected: false,
