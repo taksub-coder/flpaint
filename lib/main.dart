@@ -1,5 +1,6 @@
 // flpaint_プロトタイプE.2h_IN＿EXP実装版
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/gestures.dart';
 import 'package:window_manager/window_manager.dart';
@@ -9,32 +10,40 @@ import 'widgets/drawing_canvas.dart';
 import 'widgets/drawing_controls.dart';
 import 'widgets/tool_sidebar.dart';
 
+bool get _isDesktopPlatform =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.macOS);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // window_manager の初期化
-  await windowManager.ensureInitialized();
+  if (_isDesktopPlatform) {
+    // window_manager の初期化
+    await windowManager.ensureInitialized();
 
-  // ウィンドウオプションを設定
-  WindowOptions windowOptions = const WindowOptions(
-    size: Size(838, 980),           // キャンバス768 + サイドバー70 + 余裕
-    minimumSize: Size(480, 800),
-    maximumSize: Size(3000, 3000),   // 必要に応じて大きく
-    center: true,
-    backgroundColor: Colors.transparent,
-    skipTaskbar: false,
-    title: 'FLPaint - プロトタイプE.2g',
-    // 必要に応じて windowButtonVisibility: false, などを追加可能
-  );
+    // ウィンドウオプションを設定
+    WindowOptions windowOptions = const WindowOptions(
+      size: Size(838, 980),           // キャンバス768 + サイドバー70 + 余裕
+      minimumSize: Size(480, 800),
+      maximumSize: Size(3000, 3000),   // 必要に応じて大きく
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      title: 'FLPaint - プロトタイプE.2g',
+      // 必要に応じて windowButtonVisibility: false, などを追加可能
+    );
 
-  // ウィンドウを表示・フォーカスするまで待機
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
-    // 追加でサイズを確実に適用（最新版で安定する書き方）
-    await windowManager.setSize(const Size(838, 980));
-    await windowManager.setMinimumSize(const Size(480, 800));
-    await windowManager.center();
-    await windowManager.show();
-    await windowManager.focus();
-  });
+    // ウィンドウを表示・フォーカスするまで待機
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      // 追加でサイズを確実に適用（最新版で安定する書き方）
+      await windowManager.setSize(const Size(838, 980));
+      await windowManager.setMinimumSize(const Size(480, 800));
+      await windowManager.center();
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
 
   runApp(
     ChangeNotifierProvider(
@@ -88,6 +97,12 @@ class _MyHomePageState extends State<MyHomePage> {
       ..scale(1.0);          // スケールは1.0（キャンバス原寸）
   }
 
+  void _onCanvasTwoFingerPan(Offset delta) {
+    if (delta == Offset.zero) return;
+    _transformationController.value = _transformationController.value.clone()
+      ..translate(delta.dx, delta.dy);
+  }
+
   @override
   void dispose() {
     _transformationController.dispose();
@@ -95,6 +110,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _onPanelPointerDown(PointerDownEvent event) {
+    if (!_isDesktopPlatform) return;
     _panelSecondaryPointerDown =
         (event.buttons & kSecondaryMouseButton) != 0;
     if (_panelSecondaryPointerDown) {
@@ -103,6 +119,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _onPanelPointerMove(PointerMoveEvent event) {
+    if (!_isDesktopPlatform) return;
     if (!_panelSecondaryPointerDown) return;
     if ((event.buttons & kSecondaryMouseButton) == 0) {
       _panelSecondaryPointerDown = false;
@@ -117,10 +134,12 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _onPanelPanZoomStart(PointerPanZoomStartEvent event) {
+    if (!_isDesktopPlatform) return;
     _panelPanZoomTracking = true;
   }
 
   void _onPanelPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    if (!_isDesktopPlatform) return;
     if (!_panelPanZoomTracking) return;
     final delta = event.panDelta;
     if (delta == Offset.zero) return;
@@ -131,10 +150,14 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _onPanelPanZoomEnd(PointerPanZoomEndEvent event) {
+    if (!_isDesktopPlatform) return;
     _panelPanZoomTracking = false;
   }
 
   Widget _buildWindowMovablePanel({required Widget child}) {
+    if (!_isDesktopPlatform) {
+      return child;
+    }
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: _onPanelPointerDown,
@@ -206,7 +229,9 @@ class _MyHomePageState extends State<MyHomePage> {
                               ],
                             ),
                             // DrawingCanvas を確実に最前面にする
-                            child: const DrawingCanvas(),
+                            child: DrawingCanvas(
+                              onTwoFingerPan: _onCanvasTwoFingerPan,
+                            ),
                           ),
                         ),
                       ),
