@@ -94,7 +94,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void _alignToTopLeft() {
     // スケール1.0で左上に寄せる（翻訳を0にセット）
     _transformationController.value = Matrix4.identity()
-      ..translate(0.0, 0.0)  // 左上座標を(0,0)に固定
+      ..translate(-500.0, -500.0)  // 左上座標を(0,0)に固定
       ..scale(1.0);          // スケールは1.0（キャンバス原寸）
   }
 
