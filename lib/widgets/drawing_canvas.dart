@@ -528,7 +528,7 @@ class DrawingPainter extends CustomPainter {
         ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
         ..filterQuality = toneShader == null
             ? FilterQuality.low
-            : FilterQuality.none;
+            : FilterQuality.medium;
 
       switch (line.tool) {
         case ToolType.rect:

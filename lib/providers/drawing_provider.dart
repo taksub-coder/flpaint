@@ -97,7 +97,18 @@ class DrawingProvider extends ChangeNotifier {
   static const double _pressureTaperInBase = 14.0;
   static const double _pressureTaperOutBase = 14.0;
   static const Size _ioCanvasSize = Size(768, 1024);
-  static const double _toneShaderFrequency = 2.0;
+  static final Float64List _toneShaderMatrixRotated = (() {
+    final c = math.cos(math.pi / 4);
+    final s = math.sin(math.pi / 4);
+    return Float64List.fromList(
+      <double>[
+        c, s, 0, 0,
+        -s, c, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+      ],
+    );
+  })();
   DateTime? _lastPointTime;
   double _lastSpeed = 0.0; // px/ms for current stroke
 
@@ -111,79 +122,64 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   Future<void> _initializeToneShaders() async {
-    final shaderMatrix = _toneShaderMatrix(_toneShaderFrequency);
     final tone30Image = await _createToneTileImage(
-      tileSize: 4,
-      density: 0.30,
+      blackPixels: 1,
     );
     final tone60Image = await _createToneTileImage(
-      tileSize: 4,
-      density: 0.60,
+      blackPixels: 2,
     );
     final tone80Image = await _createToneTileImage(
-      tileSize: 4,
-      density: 0.80,
+      blackPixels: 3,
     );
 
     _tone30Shader = ui.ImageShader(
       tone30Image,
       TileMode.repeated,
       TileMode.repeated,
-      shaderMatrix,
+      _toneShaderMatrixRotated,
     );
     _tone60Shader = ui.ImageShader(
       tone60Image,
       TileMode.repeated,
       TileMode.repeated,
-      shaderMatrix,
+      _toneShaderMatrixRotated,
     );
     _tone80Shader = ui.ImageShader(
       tone80Image,
       TileMode.repeated,
       TileMode.repeated,
-      shaderMatrix,
+      _toneShaderMatrixRotated,
     );
     notifyListeners();
   }
 
-  Float64List _toneShaderMatrix(double frequency) {
-    return Float64List.fromList(
-      <double>[
-        frequency, 0, 0, 0,
-        0, frequency, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-      ],
-    );
-  }
-
   Future<ui.Image> _createToneTileImage({
-    required int tileSize,
-    required double density,
+    required int blackPixels,
   }) async {
-    final clampedDensity = density.clamp(0.0, 1.0).toDouble();
-    const bayer4 = <List<int>>[
-      <int>[0, 8, 2, 10],
-      <int>[12, 4, 14, 6],
-      <int>[3, 11, 1, 9],
-      <int>[15, 7, 13, 5],
-    ];
-    final threshold = (clampedDensity * 16).round().clamp(0, 16);
-
+    const int tileSize = 2;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
     final dotPaint = Paint()
       ..color = Colors.black
       ..isAntiAlias = false;
-    for (int y = 0; y < tileSize; y++) {
-      for (int x = 0; x < tileSize; x++) {
-        if (bayer4[y % 4][x % 4] >= threshold) continue;
-        canvas.drawRect(
-          Rect.fromLTWH(x.toDouble(), y.toDouble(), 1, 1),
-          dotPaint,
-        );
-      }
+
+    final pixels = <Offset>[];
+    if (blackPixels >= 1) {
+      pixels.add(const Offset(0, 0)); // 30% base
+    }
+    if (blackPixels >= 2) {
+      pixels.add(const Offset(1, 1)); // 60% checker
+    }
+    if (blackPixels >= 3) {
+      pixels.add(const Offset(1, 0)); // 80%
+    }
+
+    for (final pixel in pixels) {
+      canvas.drawRect(
+        Rect.fromLTWH(pixel.dx, pixel.dy, 1, 1),
+        dotPaint,
+      );
     }
     final picture = recorder.endRecording();
     return picture.toImage(tileSize, tileSize);
@@ -1178,7 +1174,7 @@ class DrawingProvider extends ChangeNotifier {
         ..strokeJoin = StrokeJoin.round
         ..filterQuality = toneShader == null
             ? FilterQuality.low
-            : FilterQuality.none;
+            : FilterQuality.medium;
 
       switch (line.tool) {
         case ToolType.rect:
