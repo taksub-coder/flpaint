@@ -618,7 +618,7 @@ class DrawingPainter extends CustomPainter {
     }
 
     // Handles
-    const double handleSize = 12;
+    const double handleSize = 24;
     final handlePaint = Paint()..color = Colors.black;
     for (final entry in handles.entries) {
       if (entry.key == SelectionHandle.mirror) continue;

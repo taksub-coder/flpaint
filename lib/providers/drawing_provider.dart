@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:image/image.dart' as img;
 
 import '../models/drawing.dart';
@@ -199,6 +200,24 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   Future<void> exportImageFromDialog() async {
+    final ui.Image merged = await _renderExportImage(_ioCanvasSize);
+
+    if (Platform.isAndroid) {
+      final Uint8List? encoded = await _encodeExportImage(
+        merged,
+        exportJpeg: false,
+      );
+      if (encoded == null) return;
+      await FlutterFileDialog.saveFile(
+        params: SaveFileDialogParams(
+          data: encoded,
+          fileName: 'flpaint.png',
+          mimeTypesFilter: const ['image/png', 'image/jpeg'],
+        ),
+      );
+      return;
+    }
+
     final FileSaveLocation? location = await getSaveLocation(
       suggestedName: 'flpaint.png',
       acceptedTypeGroups: const [
@@ -217,7 +236,6 @@ class DrawingProvider extends ChangeNotifier {
     final String lower = savePath.toLowerCase();
     final bool exportJpeg = lower.endsWith('.jpg') || lower.endsWith('.jpeg');
 
-    final ui.Image merged = await _renderExportImage(_ioCanvasSize);
     final Uint8List? encoded = await _encodeExportImage(
       merged,
       exportJpeg: exportJpeg,
