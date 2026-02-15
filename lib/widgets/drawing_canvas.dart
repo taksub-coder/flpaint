@@ -522,13 +522,14 @@ class DrawingPainter extends CustomPainter {
     for (final line in lines) {
       final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
       paint
+        ..isAntiAlias = toneShader == null
         ..shader = toneShader
         ..color = (toneShader == null ? line.color : Colors.white)
             .withValues(alpha: line.eraserAlpha)
         ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
         ..filterQuality = toneShader == null
             ? FilterQuality.low
-            : FilterQuality.medium;
+            : FilterQuality.none;
 
       switch (line.tool) {
         case ToolType.rect:

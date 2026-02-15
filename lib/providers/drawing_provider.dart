@@ -1165,6 +1165,7 @@ class DrawingProvider extends ChangeNotifier {
       if (layer != null && line.layer != layer) continue;
       final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
       paint
+        ..isAntiAlias = toneShader == null
         ..shader = toneShader
         ..color = (toneShader == null ? line.color : Colors.white)
             .withValues(alpha: line.eraserAlpha)
@@ -1174,7 +1175,7 @@ class DrawingProvider extends ChangeNotifier {
         ..strokeJoin = StrokeJoin.round
         ..filterQuality = toneShader == null
             ? FilterQuality.low
-            : FilterQuality.medium;
+            : FilterQuality.none;
 
       switch (line.tool) {
         case ToolType.rect:
