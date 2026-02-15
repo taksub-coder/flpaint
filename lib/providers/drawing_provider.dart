@@ -666,6 +666,23 @@ class DrawingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void cancelCurrentLine() {
+    if (_isShapeTool(_tool)) {
+      if (_shapeStart != null || _shapeEnd != null) {
+        _shapeStart = null;
+        _shapeEnd = null;
+        notifyListeners();
+      }
+      return;
+    }
+
+    if (_currentLine == null) return;
+    _lines.remove(_currentLine);
+    _currentLine = null;
+    _lineStartPoint = null;
+    notifyListeners();
+  }
+
   bool _isShapeTool(ToolType tool) {
     return tool == ToolType.rect ||
         tool == ToolType.fillRect ||

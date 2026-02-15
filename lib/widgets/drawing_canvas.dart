@@ -7,7 +7,12 @@ import '../providers/drawing_provider.dart';
 
 class DrawingCanvas extends StatefulWidget {
   final ValueChanged<Offset>? onTwoFingerPan;
-  const DrawingCanvas({super.key, this.onTwoFingerPan});
+  final void Function(Offset focalPointGlobal, double scaleDelta)? onTwoFingerScale;
+  const DrawingCanvas({
+    super.key,
+    this.onTwoFingerPan,
+    this.onTwoFingerScale,
+  });
   @override
   State<DrawingCanvas> createState() => _DrawingCanvasState();
 }
@@ -18,6 +23,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   SelectionDragState? _dragState;
   final Map<int, Offset> _activeTouchPoints = {};
   Offset? _lastTwoFingerFocalPoint;
+  double? _lastTwoFingerDistance;
+  bool _ignoreDrawingGestures = false;
   //もっと長い距離をかけて細くしたい場合は、以下の定数を大きくします。
   static const double _minHandleDistance = 60.0;// 入り
   static const double _rotationSoftRadius = 80.0;// 抜き（払い）は特にながく
@@ -41,32 +48,35 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               onPointerMove: (event) => _handlePointerMove(event, drawing),
               onPointerUp: _handlePointerUpOrCancel,
               onPointerCancel: _handlePointerUpOrCancel,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTapDown: (details) => _handleTapDown(details, drawing),
-                onPanStart: (details) => _handlePanStart(details, drawing),
-                onPanUpdate: (details) => _handlePanUpdate(details, drawing),
-                onPanEnd: (_) => _handlePanEnd(drawing),
-                onPanCancel: () => _handlePanEnd(drawing),
-                child: CustomPaint(
-                  painter: DrawingPainter(
-                    layerALines: drawing.layerALines,
-                    layerBLines: drawing.layerBLines,
-                    isLayerAVisible: drawing.isLayerAVisible,
-                    isLayerBVisible: drawing.isLayerBVisible,
-                    layerAOpacity: drawing.layerAOpacity,
-                    layerBOpacity: drawing.layerBOpacity,
-                    layerABaseImage: drawing.layerABaseImage,
-                    layerBBaseImage: drawing.layerBBaseImage,
-                    selection: drawing.selection,
-                    lassoDraft: drawing.lassoDraft,
-                    isDrawingLasso: drawing.isDrawingLasso,
-                    handles: drawing.getSelectionHandles(),
-                    currentTool: drawing.currentTool,
-                    shapeStart: drawing.shapeStart,
-                    shapeEnd: drawing.shapeEnd,
+              child: IgnorePointer(
+                ignoring: _ignoreDrawingGestures,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (details) => _handleTapDown(details, drawing),
+                  onPanStart: (details) => _handlePanStart(details, drawing),
+                  onPanUpdate: (details) => _handlePanUpdate(details, drawing),
+                  onPanEnd: (_) => _handlePanEnd(drawing),
+                  onPanCancel: () => _handlePanEnd(drawing),
+                  child: CustomPaint(
+                    painter: DrawingPainter(
+                      layerALines: drawing.layerALines,
+                      layerBLines: drawing.layerBLines,
+                      isLayerAVisible: drawing.isLayerAVisible,
+                      isLayerBVisible: drawing.isLayerBVisible,
+                      layerAOpacity: drawing.layerAOpacity,
+                      layerBOpacity: drawing.layerBOpacity,
+                      layerABaseImage: drawing.layerABaseImage,
+                      layerBBaseImage: drawing.layerBBaseImage,
+                      selection: drawing.selection,
+                      lassoDraft: drawing.lassoDraft,
+                      isDrawingLasso: drawing.isDrawingLasso,
+                      handles: drawing.getSelectionHandles(),
+                      currentTool: drawing.currentTool,
+                      shapeStart: drawing.shapeStart,
+                      shapeEnd: drawing.shapeEnd,
+                    ),
+                    child: Container(),
                   ),
-                  child: Container(),
                 ),
               ),
             );
@@ -79,41 +89,61 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   bool get _isTwoFingerTouchActive => _activeTouchPoints.length >= 2;
 
   Offset _twoFingerFocalPoint() {
-    final points = _activeTouchPoints.values.toList(growable: false);
+    final points = _activeTouchPoints.values.take(2).toList(growable: false);
     return Offset(
       (points[0].dx + points[1].dx) / 2,
       (points[0].dy + points[1].dy) / 2,
     );
   }
 
+  double _twoFingerDistance() {
+    final points = _activeTouchPoints.values.take(2).toList(growable: false);
+    return (points[0] - points[1]).distance;
+  }
+
   void _cancelDrawingForTwoFinger(DrawingProvider drawing) {
     _dragState = null;
     _lastOffset = null;
-    drawing.endLine();
+    drawing.cancelCurrentLine();
   }
 
   void _handlePointerDown(PointerDownEvent event, DrawingProvider drawing) {
     if (event.kind != ui.PointerDeviceKind.touch) return;
-    _activeTouchPoints[event.pointer] = event.localPosition;
+    _activeTouchPoints[event.pointer] = event.position;
     if (_isTwoFingerTouchActive) {
+      if (!_ignoreDrawingGestures) {
+        setState(() {
+          _ignoreDrawingGestures = true;
+        });
+      }
       _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
+      _lastTwoFingerDistance = _twoFingerDistance();
       _cancelDrawingForTwoFinger(drawing);
     }
   }
 
   void _handlePointerMove(PointerMoveEvent event, DrawingProvider drawing) {
     if (!_activeTouchPoints.containsKey(event.pointer)) return;
-    _activeTouchPoints[event.pointer] = event.localPosition;
+    _activeTouchPoints[event.pointer] = event.position;
     if (_isTwoFingerTouchActive) {
-      final currentFocal = _twoFingerFocalPoint();
-      final lastFocal = _lastTwoFingerFocalPoint;
-      if (lastFocal != null) {
-        final delta = currentFocal - lastFocal;
+      final focal = _twoFingerFocalPoint();
+      final distance = _twoFingerDistance();
+      if (_lastTwoFingerFocalPoint != null) {
+        final delta = focal - _lastTwoFingerFocalPoint!;
         if (delta != Offset.zero) {
           widget.onTwoFingerPan?.call(delta);
         }
       }
-      _lastTwoFingerFocalPoint = currentFocal;
+      if (_lastTwoFingerDistance != null &&
+          _lastTwoFingerDistance! > 0 &&
+          distance > 0) {
+        final scaleDelta = distance / _lastTwoFingerDistance!;
+        if (scaleDelta.isFinite && scaleDelta > 0) {
+          widget.onTwoFingerScale?.call(focal, scaleDelta);
+        }
+      }
+      _lastTwoFingerFocalPoint = focal;
+      _lastTwoFingerDistance = distance;
       _cancelDrawingForTwoFinger(drawing);
     }
   }
@@ -122,8 +152,15 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _activeTouchPoints.remove(event.pointer);
     if (_isTwoFingerTouchActive) {
       _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
+      _lastTwoFingerDistance = _twoFingerDistance();
     } else {
       _lastTwoFingerFocalPoint = null;
+      _lastTwoFingerDistance = null;
+      if (_ignoreDrawingGestures) {
+        setState(() {
+          _ignoreDrawingGestures = false;
+        });
+      }
     }
   }
 

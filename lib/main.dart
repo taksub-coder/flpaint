@@ -79,6 +79,7 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   final TransformationController _transformationController = TransformationController();
+  final GlobalKey _interactiveViewerKey = GlobalKey();
   bool _panelSecondaryPointerDown = false;
   bool _panelPanZoomTracking = false;
 
@@ -99,8 +100,31 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _onCanvasTwoFingerPan(Offset delta) {
     if (delta == Offset.zero) return;
+    final currentScale = _transformationController.value.getMaxScaleOnAxis();
+    final sceneDx = delta.dx / currentScale;
+    final sceneDy = delta.dy / currentScale;
     _transformationController.value = _transformationController.value.clone()
-      ..translate(delta.dx, delta.dy);
+      ..translate(sceneDx, sceneDy);
+  }
+
+  void _onCanvasTwoFingerScale(Offset focalPointGlobal, double scaleDelta) {
+    if (!scaleDelta.isFinite || scaleDelta <= 0) return;
+    final context = _interactiveViewerKey.currentContext;
+    if (context == null) return;
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox) return;
+    final localFocal = renderObject.globalToLocal(focalPointGlobal);
+    final sceneFocal = _transformationController.toScene(localFocal);
+
+    final currentScale = _transformationController.value.getMaxScaleOnAxis();
+    final targetScale = (currentScale * scaleDelta).clamp(0.1, 5.0).toDouble();
+    final effectiveScale = targetScale / currentScale;
+    if ((effectiveScale - 1.0).abs() < 0.0001) return;
+
+    _transformationController.value = _transformationController.value.clone()
+      ..translate(sceneFocal.dx, sceneFocal.dy)
+      ..scale(effectiveScale)
+      ..translate(-sceneFocal.dx, -sceneFocal.dy);
   }
 
   @override
@@ -206,6 +230,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     child: Container(
                       color: const Color(0xFF404040), // キャンバス外：ダークグレー
                       child: InteractiveViewer(
+                        key: _interactiveViewerKey,
                         constrained: false,
                         boundaryMargin: const EdgeInsets.all(2000),
                         minScale: 0.1,
@@ -231,6 +256,7 @@ class _MyHomePageState extends State<MyHomePage> {
                             // DrawingCanvas を確実に最前面にする
                             child: DrawingCanvas(
                               onTwoFingerPan: _onCanvasTwoFingerPan,
+                              onTwoFingerScale: _onCanvasTwoFingerScale,
                             ),
                           ),
                         ),
