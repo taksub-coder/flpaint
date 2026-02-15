@@ -1,4 +1,4 @@
-// flpaint_プロトタイプE.2h_IN＿EXP実装版
+// flpaint_プロトタイプE.2i_トーン実装版
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -125,6 +125,16 @@ class _MyHomePageState extends State<MyHomePage> {
       ..translate(sceneFocal.dx, sceneFocal.dy)
       ..scale(effectiveScale)
       ..translate(-sceneFocal.dx, -sceneFocal.dy);
+  }
+
+  Offset _toCanvasPosition(Offset globalPoint) {
+    final context = _interactiveViewerKey.currentContext;
+    if (context == null) return globalPoint;
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox) return globalPoint;
+    final localPoint = renderObject.globalToLocal(globalPoint);
+    final scenePoint = _transformationController.toScene(localPoint);
+    return scenePoint - const Offset(500.0, 500.0);
   }
 
   @override
@@ -257,6 +267,7 @@ class _MyHomePageState extends State<MyHomePage> {
                             child: DrawingCanvas(
                               onTwoFingerPan: _onCanvasTwoFingerPan,
                               onTwoFingerScale: _onCanvasTwoFingerScale,
+                              toCanvas: _toCanvasPosition,
                             ),
                           ),
                         ),

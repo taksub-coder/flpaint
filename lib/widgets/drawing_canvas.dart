@@ -8,10 +8,12 @@ import '../providers/drawing_provider.dart';
 class DrawingCanvas extends StatefulWidget {
   final ValueChanged<Offset>? onTwoFingerPan;
   final void Function(Offset focalPointGlobal, double scaleDelta)? onTwoFingerScale;
+  final Offset Function(Offset globalPoint)? toCanvas;
   const DrawingCanvas({
     super.key,
     this.onTwoFingerPan,
     this.onTwoFingerScale,
+    this.toCanvas,
   });
   @override
   State<DrawingCanvas> createState() => _DrawingCanvasState();
@@ -67,6 +69,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       layerBOpacity: drawing.layerBOpacity,
                       layerABaseImage: drawing.layerABaseImage,
                       layerBBaseImage: drawing.layerBBaseImage,
+                      tone30Shader: drawing.tone30Shader,
+                      tone60Shader: drawing.tone60Shader,
+                      tone80Shader: drawing.tone80Shader,
                       selection: drawing.selection,
                       lassoDraft: drawing.lassoDraft,
                       isDrawingLasso: drawing.isDrawingLasso,
@@ -105,6 +110,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _dragState = null;
     _lastOffset = null;
     drawing.cancelCurrentLine();
+  }
+
+  Offset _toCanvasPosition(Offset globalPosition, {Offset? fallbackLocal}) {
+    final mapper = widget.toCanvas;
+    if (mapper != null) {
+      return mapper(globalPosition);
+    }
+    return fallbackLocal ?? globalPosition;
   }
 
   void _handlePointerDown(PointerDownEvent event, DrawingProvider drawing) {
@@ -165,15 +178,19 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   Future<void> _handleTapDown(TapDownDetails details, DrawingProvider drawing) async {
+    final pos = _toCanvasPosition(
+      details.globalPosition,
+      fallbackLocal: details.localPosition,
+    );
     if (drawing.currentTool == ToolType.lasso && drawing.selection != null) {
-      final handle = drawing.hitTestSelection(details.localPosition);
+      final handle = drawing.hitTestSelection(pos);
       if (handle == SelectionHandle.mirror) {
         drawing.beginSelectionInteraction();
         drawing.flipSelectionHorizontal();
         return;
       }
       if (handle == SelectionHandle.none &&
-          drawing.shouldFinishSelection(details.localPosition)) {
+          drawing.shouldFinishSelection(pos)) {
         await drawing.commitSelection();
       }
     }
@@ -185,7 +202,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       _dragState = null;
       return;
     }
-    final pos = details.localPosition;
+    final pos = _toCanvasPosition(
+      details.globalPosition,
+      fallbackLocal: details.localPosition,
+    );
     _lastOffset = pos;
     if (drawing.currentTool == ToolType.lasso) {
       if (drawing.selection != null) {
@@ -219,7 +239,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _handlePanUpdate(DragUpdateDetails details, DrawingProvider drawing) {
     if (_isTwoFingerTouchActive) return;
-    final pos = details.localPosition;
+    final pos = _toCanvasPosition(
+      details.globalPosition,
+      fallbackLocal: details.localPosition,
+    );
     if (drawing.currentTool == ToolType.lasso) {
       if (drawing.isDrawingLasso) {
         drawing.extendLasso(pos);
@@ -394,6 +417,9 @@ class DrawingPainter extends CustomPainter {
   final double layerBOpacity;
   final ui.Image? layerABaseImage;
   final ui.Image? layerBBaseImage;
+  final ui.ImageShader? tone30Shader;
+  final ui.ImageShader? tone60Shader;
+  final ui.ImageShader? tone80Shader;
   final LassoSelection? selection;
   final List<Offset> lassoDraft;
   final bool isDrawingLasso;
@@ -411,6 +437,9 @@ class DrawingPainter extends CustomPainter {
     required this.layerBOpacity,
     required this.layerABaseImage,
     required this.layerBBaseImage,
+    required this.tone30Shader,
+    required this.tone60Shader,
+    required this.tone80Shader,
     required this.selection,
     required this.lassoDraft,
     required this.isDrawingLasso,
@@ -491,9 +520,15 @@ class DrawingPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round;
 
     for (final line in lines) {
+      final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
       paint
-        ..color = _toneAwareLineColor(line).withValues(alpha: line.eraserAlpha)
-        ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver;
+        ..shader = toneShader
+        ..color = (toneShader == null ? line.color : Colors.white)
+            .withValues(alpha: line.eraserAlpha)
+        ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
+        ..filterQuality = toneShader == null
+            ? FilterQuality.low
+            : FilterQuality.none;
 
       switch (line.tool) {
         case ToolType.rect:
@@ -558,16 +593,16 @@ class DrawingPainter extends CustomPainter {
     }
   }
 
-  Color _toneAwareLineColor(DrawnLine line) {
-    switch (line.tool) {
+  ui.ImageShader? _toneShaderForTool(ToolType tool) {
+    switch (tool) {
       case ToolType.tone30:
-        return Colors.grey.shade300;
+        return tone30Shader;
       case ToolType.tone60:
-        return Colors.grey.shade600;
+        return tone60Shader;
       case ToolType.tone80:
-        return Colors.grey.shade800;
+        return tone80Shader;
       default:
-        return line.color;
+        return null;
     }
   }
 

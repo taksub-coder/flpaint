@@ -44,6 +44,9 @@ class DrawingProvider extends ChangeNotifier {
   ui.Image? _layerABaseImage;
   ui.Image? _layerBBaseImage;
   Size _canvasSize = Size.zero;
+  ui.ImageShader? _tone30Shader;
+  ui.ImageShader? _tone60Shader;
+  ui.ImageShader? _tone80Shader;
 
   // Lasso
   final List<Offset> _lassoPoints = [];
@@ -75,6 +78,9 @@ class DrawingProvider extends ChangeNotifier {
   double get layerBOpacity => _layerBOpacity;
   ui.Image? get layerABaseImage => _layerABaseImage;
   ui.Image? get layerBBaseImage => _layerBBaseImage;
+  ui.ImageShader? get tone30Shader => _tone30Shader;
+  ui.ImageShader? get tone60Shader => _tone60Shader;
+  ui.ImageShader? get tone80Shader => _tone80Shader;
   List<Offset> get lassoDraft => List.unmodifiable(_lassoPoints);
   bool get isDrawingLasso => _isDrawingLasso;
   LassoSelection? get selection => _selection;
@@ -91,12 +97,96 @@ class DrawingProvider extends ChangeNotifier {
   static const double _pressureTaperInBase = 14.0;
   static const double _pressureTaperOutBase = 14.0;
   static const Size _ioCanvasSize = Size(768, 1024);
+  static const double _toneShaderFrequency = 2.0;
   DateTime? _lastPointTime;
   double _lastSpeed = 0.0; // px/ms for current stroke
+
+  DrawingProvider() {
+    _initializeToneShaders();
+  }
 
   void setCanvasSize(Size size) {
     if (_canvasSize == size) return;
     _canvasSize = size;
+  }
+
+  Future<void> _initializeToneShaders() async {
+    final shaderMatrix = _toneShaderMatrix(_toneShaderFrequency);
+    final tone30Image = await _createToneTileImage(
+      tileSize: 4,
+      density: 0.30,
+    );
+    final tone60Image = await _createToneTileImage(
+      tileSize: 4,
+      density: 0.60,
+    );
+    final tone80Image = await _createToneTileImage(
+      tileSize: 4,
+      density: 0.80,
+    );
+
+    _tone30Shader = ui.ImageShader(
+      tone30Image,
+      TileMode.repeated,
+      TileMode.repeated,
+      shaderMatrix,
+    );
+    _tone60Shader = ui.ImageShader(
+      tone60Image,
+      TileMode.repeated,
+      TileMode.repeated,
+      shaderMatrix,
+    );
+    _tone80Shader = ui.ImageShader(
+      tone80Image,
+      TileMode.repeated,
+      TileMode.repeated,
+      shaderMatrix,
+    );
+    notifyListeners();
+  }
+
+  Float64List _toneShaderMatrix(double frequency) {
+    return Float64List.fromList(
+      <double>[
+        frequency, 0, 0, 0,
+        0, frequency, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+      ],
+    );
+  }
+
+  Future<ui.Image> _createToneTileImage({
+    required int tileSize,
+    required double density,
+  }) async {
+    final clampedDensity = density.clamp(0.0, 1.0).toDouble();
+    const bayer4 = <List<int>>[
+      <int>[0, 8, 2, 10],
+      <int>[12, 4, 14, 6],
+      <int>[3, 11, 1, 9],
+      <int>[15, 7, 13, 5],
+    ];
+    final threshold = (clampedDensity * 16).round().clamp(0, 16);
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+    final dotPaint = Paint()
+      ..color = Colors.black
+      ..isAntiAlias = false;
+    for (int y = 0; y < tileSize; y++) {
+      for (int x = 0; x < tileSize; x++) {
+        if (bayer4[y % 4][x % 4] >= threshold) continue;
+        canvas.drawRect(
+          Rect.fromLTWH(x.toDouble(), y.toDouble(), 1, 1),
+          dotPaint,
+        );
+      }
+    }
+    final picture = recorder.endRecording();
+    return picture.toImage(tileSize, tileSize);
   }
 
   void setTool(ToolType tool) {
@@ -503,12 +593,6 @@ class DrawingProvider extends ChangeNotifier {
 
   Color _strokeColorForTool(ToolType tool) {
     switch (tool) {
-      case ToolType.tone30:
-        return Colors.grey.shade300;
-      case ToolType.tone60:
-        return Colors.grey.shade600;
-      case ToolType.tone80:
-        return Colors.grey.shade800;
       default:
         return Colors.black;
     }
@@ -1062,6 +1146,19 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   // Painting helpers shared with CustomPainter and off-screen rendering
+  ui.ImageShader? _toneShaderForTool(ToolType tool) {
+    switch (tool) {
+      case ToolType.tone30:
+        return _tone30Shader;
+      case ToolType.tone60:
+        return _tone60Shader;
+      case ToolType.tone80:
+        return _tone80Shader;
+      default:
+        return null;
+    }
+  }
+
   void _drawLines(Canvas canvas, Size size, {DrawingLayer? layer}) {
     final paint = Paint()
       ..isAntiAlias = true
@@ -1070,12 +1167,18 @@ class DrawingProvider extends ChangeNotifier {
 
     for (final line in _lines) {
       if (layer != null && line.layer != layer) continue;
+      final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
       paint
-        ..color = line.color.withValues(alpha: line.eraserAlpha)
+        ..shader = toneShader
+        ..color = (toneShader == null ? line.color : Colors.white)
+            .withValues(alpha: line.eraserAlpha)
         ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round;
+        ..strokeJoin = StrokeJoin.round
+        ..filterQuality = toneShader == null
+            ? FilterQuality.low
+            : FilterQuality.none;
 
       switch (line.tool) {
         case ToolType.rect:
