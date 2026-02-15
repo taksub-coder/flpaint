@@ -115,7 +115,7 @@ class ToolSidebar extends StatelessWidget {
                   label: 'EXP',
                   tooltip: 'Export image',
                   selected: false,
-                  onTap: () => drawing.exportImageFromDialog(),
+                  onTap: () => drawing.exportImageFromDialog(context: context),
                 ),
               ],
             ),

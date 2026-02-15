@@ -619,7 +619,13 @@ class DrawingPainter extends CustomPainter {
 
     // Handles
     const double handleSize = 24;
-    final handlePaint = Paint()..color = Colors.black;
+    final handleFillPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    final handleStrokePaint = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
     for (final entry in handles.entries) {
       if (entry.key == SelectionHandle.mirror) continue;
       final rect = Rect.fromCenter(
@@ -627,7 +633,8 @@ class DrawingPainter extends CustomPainter {
         width: handleSize,
         height: handleSize,
       );
-      canvas.drawRect(rect, handlePaint);
+      canvas.drawRect(rect, handleFillPaint);
+      canvas.drawRect(rect, handleStrokePaint);
     }
 
     // Mirror button: draw ◀▷ text in system font inside a small rounded rect

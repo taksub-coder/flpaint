@@ -199,24 +199,28 @@ class DrawingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> exportImageFromDialog() async {
-    final ui.Image merged = await _renderExportImage(_ioCanvasSize);
-
+  Future<void> exportImageFromDialog({BuildContext? context}) async {
     if (Platform.isAndroid) {
+      final bool exportJpeg = await _selectAndroidExportIsJpeg(context);
+      final ui.Image merged = await _renderExportImage(_ioCanvasSize);
       final Uint8List? encoded = await _encodeExportImage(
         merged,
-        exportJpeg: false,
+        exportJpeg: exportJpeg,
       );
       if (encoded == null) return;
       await FlutterFileDialog.saveFile(
         params: SaveFileDialogParams(
           data: encoded,
-          fileName: 'flpaint.png',
-          mimeTypesFilter: const ['image/png', 'image/jpeg'],
+          fileName: exportJpeg ? 'flpaint.jpg' : 'flpaint.png',
+          mimeTypesFilter: [
+            exportJpeg ? 'image/jpeg' : 'image/png',
+          ],
         ),
       );
       return;
     }
+
+    final ui.Image merged = await _renderExportImage(_ioCanvasSize);
 
     final FileSaveLocation? location = await getSaveLocation(
       suggestedName: 'flpaint.png',
@@ -242,6 +246,29 @@ class DrawingProvider extends ChangeNotifier {
     );
     if (encoded == null) return;
     await File(savePath).writeAsBytes(encoded, flush: true);
+  }
+
+  Future<bool> _selectAndroidExportIsJpeg(BuildContext? context) async {
+    if (context == null) return false;
+    final bool? exportJpeg = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Export format'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('PNG'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('JPG'),
+            ),
+          ],
+        );
+      },
+    );
+    return exportJpeg ?? false;
   }
 
   Future<ui.Image> _fitImportedImageToCanvas(ui.Image source, Size canvasSize) async {
@@ -345,7 +372,10 @@ class DrawingProvider extends ChangeNotifier {
       numChannels: 4,
       order: img.ChannelOrder.rgba,
     );
-    final jpegBytes = img.encodeJpg(converted, quality: 95);
+    final whiteBackground = img.Image(width: image.width, height: image.height);
+    img.fill(whiteBackground, color: img.ColorRgb8(255, 255, 255));
+    img.compositeImage(whiteBackground, converted);
+    final jpegBytes = img.encodeJpg(whiteBackground, quality: 95);
     return Uint8List.fromList(jpegBytes);
   }
 
