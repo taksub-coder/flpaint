@@ -454,6 +454,13 @@ class DrawingPainter extends CustomPainter {
     // ★ ここを削除（またはコメントアウト） ★
     // canvas.drawColor(Colors.white, BlendMode.srcOver);
 
+    final Path? layerAHolePath = selection != null && selection!.layer == DrawingLayer.layerA
+        ? selection!.maskPath
+        : null;
+    final Path? layerBHolePath = selection != null && selection!.layer == DrawingLayer.layerB
+        ? selection!.maskPath
+        : null;
+
     _drawLayer(
       canvas,
       size,
@@ -461,6 +468,7 @@ class DrawingPainter extends CustomPainter {
       layerALines,
       isVisible: isLayerAVisible,
       opacity: layerAOpacity,
+      holePath: layerAHolePath,
     );
     _drawLayer(
       canvas,
@@ -469,6 +477,7 @@ class DrawingPainter extends CustomPainter {
       layerBLines,
       isVisible: isLayerBVisible,
       opacity: layerBOpacity,
+      holePath: layerBHolePath,
     );
 
     if (selection != null) {
@@ -500,6 +509,7 @@ class DrawingPainter extends CustomPainter {
     List<DrawnLine> lines, {
     required bool isVisible,
     required double opacity,
+    Path? holePath,
   }) {
     if (!isVisible || opacity <= 0) return;
     canvas.saveLayer(
@@ -507,9 +517,23 @@ class DrawingPainter extends CustomPainter {
       Paint()..color = Colors.white.withValues(alpha: opacity),
     );
     if (baseImage != null) {
-      canvas.drawImage(baseImage, Offset.zero, Paint());
+      canvas.drawImage(
+        baseImage,
+        Offset.zero,
+        Paint()
+          ..isAntiAlias = true
+          ..filterQuality = FilterQuality.high,
+      );
     }
     _drawLines(canvas, lines);
+    if (holePath != null) {
+      canvas.drawPath(
+        holePath,
+        Paint()
+          ..blendMode = BlendMode.clear
+          ..isAntiAlias = true,
+      );
+    }
     canvas.restore();
   }
 
@@ -522,14 +546,14 @@ class DrawingPainter extends CustomPainter {
     for (final line in lines) {
       final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
       paint
-        ..isAntiAlias = toneShader == null
+        ..isAntiAlias = true
         ..shader = toneShader
         ..color = (toneShader == null ? line.color : Colors.white)
             .withValues(alpha: line.eraserAlpha)
         ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
         ..filterQuality = toneShader == null
             ? FilterQuality.low
-            : FilterQuality.medium;
+            : FilterQuality.high;
 
       switch (line.tool) {
         case ToolType.rect:
@@ -654,7 +678,7 @@ class DrawingPainter extends CustomPainter {
     }
 
     // Handles
-    const double handleSize = 24;
+    const double handleSize = 12;
     final handleFillPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.fill;

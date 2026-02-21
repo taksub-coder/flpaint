@@ -97,8 +97,9 @@ class DrawingProvider extends ChangeNotifier {
   static const double _pressureTaperInBase = 14.0;
   static const double _pressureTaperOutBase = 14.0;
   static const Size _ioCanvasSize = Size(768, 1024);
+  static const double _lassoSelectionSuperSample = 2.0;
   static const int _toneTileSize = 2;
-  static const int _toneSuperSampleScale = 4;
+  static const int _toneSuperSampleScale = 8;
   static final Float64List _toneShaderMatrixRotated = (() {
     final c = math.cos(math.pi / 4);
     final s = math.sin(math.pi / 4);
@@ -201,8 +202,8 @@ class DrawingProvider extends ChangeNotifier {
       Rect.fromLTWH(0, 0, sourceSize.toDouble(), sourceSize.toDouble()),
       Rect.fromLTWH(0, 0, _toneTileSize.toDouble(), _toneTileSize.toDouble()),
       Paint()
-        ..isAntiAlias = false
-        ..filterQuality = FilterQuality.medium,
+        ..isAntiAlias = true
+        ..filterQuality = FilterQuality.high,
     );
     final downsamplePicture = downsampleRecorder.endRecording();
     return downsamplePicture.toImage(_toneTileSize, _toneTileSize);
@@ -458,6 +459,7 @@ class DrawingProvider extends ChangeNotifier {
     }
     _drawLines(canvas, size, layer: layer);
     if (_selection != null && _selection!.layer == layer) {
+      _clearSelectionArea(canvas, _selection!);
       _paintSelection(canvas, _selection!);
     }
     canvas.restore();
@@ -977,12 +979,12 @@ class DrawingProvider extends ChangeNotifier {
     }
 
     final DrawingLayer layer = _activeLayer;
-    final ui.Image source = await _renderLayerBaseAndLines(size, layer);
-    final ui.Image selectionImage = await _extractSelection(source, path, bounds);
-    final ui.Image background = await _eraseSelection(source, path, size);
-
-    _setLayerBaseImage(layer, background);
-    _clearLayerLines(layer);
+    final ui.Image selectionImage = await _extractSelection(
+      size,
+      layer,
+      path,
+      bounds,
+    );
     _selection = LassoSelection(
       image: selectionImage,
       maskPath: path,
@@ -992,38 +994,52 @@ class DrawingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ui.Image> _renderLayerBaseAndLines(Size size, DrawingLayer layer) async {
+  Future<ui.Image> _extractSelection(
+    Size canvasSize,
+    DrawingLayer layer,
+    Path path,
+    Rect bounds,
+  ) async {
+    const double sampleScale = _lassoSelectionSuperSample;
+    final int sampledWidth = math.max(
+      1,
+      (bounds.width * sampleScale).ceil(),
+    );
+    final int sampledHeight = math.max(
+      1,
+      (bounds.height * sampleScale).ceil(),
+    );
+
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
-    canvas.drawColor(Colors.transparent, BlendMode.src);
+    canvas.scale(sampleScale, sampleScale);
+    canvas.translate(-bounds.left, -bounds.top);
+    canvas.clipPath(path);
     final layerBaseImage = _getLayerBaseImage(layer);
     if (layerBaseImage != null) {
       canvas.drawImage(layerBaseImage, Offset.zero, Paint());
     }
-    _drawLines(canvas, size, layer: layer);
+    _drawLines(canvas, canvasSize, layer: layer);
     final picture = recorder.endRecording();
-    return picture.toImage(size.width.ceil(), size.height.ceil());
-  }
 
-  Future<ui.Image> _extractSelection(ui.Image source, Path path, Rect bounds) async {
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.translate(-bounds.left, -bounds.top);
-    canvas.clipPath(path);
-    canvas.drawImage(source, Offset.zero, Paint());
-    final picture = recorder.endRecording();
-    return picture.toImage(bounds.width.ceil(), bounds.height.ceil());
-  }
+    final ui.Image sampled = await picture.toImage(sampledWidth, sampledHeight);
+    if (sampleScale == 1.0) {
+      return sampled;
+    }
 
-  Future<ui.Image> _eraseSelection(ui.Image source, Path path, Size size) async {
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawImage(source, Offset.zero, Paint());
-    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
-    canvas.drawPath(path, Paint()..blendMode = BlendMode.clear);
-    canvas.restore();
-    final picture = recorder.endRecording();
-    return picture.toImage(size.width.ceil(), size.height.ceil());
+    final downsampleRecorder = ui.PictureRecorder();
+    final downsampleCanvas = Canvas(downsampleRecorder);
+    downsampleCanvas.drawColor(Colors.transparent, BlendMode.src);
+    downsampleCanvas.drawImageRect(
+      sampled,
+      Rect.fromLTWH(0, 0, sampled.width.toDouble(), sampled.height.toDouble()),
+      Rect.fromLTWH(0, 0, bounds.width, bounds.height),
+      Paint()
+        ..isAntiAlias = true
+        ..filterQuality = FilterQuality.high,
+    );
+    final downsamplePicture = downsampleRecorder.endRecording();
+    return downsamplePicture.toImage(bounds.width.ceil(), bounds.height.ceil());
   }
 
   // Selection manipulation
@@ -1069,7 +1085,7 @@ class DrawingProvider extends ChangeNotifier {
 
   SelectionHandle hitTestSelection(
     Offset position, {
-    double handleRadius = 26,
+    double handleRadius = 18,
     double mirrorRadius = 32,
   }) {
     if (_selection == null) return SelectionHandle.none;
@@ -1158,6 +1174,7 @@ class DrawingProvider extends ChangeNotifier {
     }
     _drawLines(canvas, size, layer: layer);
     if (_selection != null && _selection!.layer == layer) {
+      _clearSelectionArea(canvas, _selection!);
       _paintSelection(canvas, _selection!);
     }
     final picture = recorder.endRecording();
@@ -1188,7 +1205,7 @@ class DrawingProvider extends ChangeNotifier {
       if (layer != null && line.layer != layer) continue;
       final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
       paint
-        ..isAntiAlias = toneShader == null
+        ..isAntiAlias = true
         ..shader = toneShader
         ..color = (toneShader == null ? line.color : Colors.white)
             .withValues(alpha: line.eraserAlpha)
@@ -1198,7 +1215,7 @@ class DrawingProvider extends ChangeNotifier {
         ..strokeJoin = StrokeJoin.round
         ..filterQuality = toneShader == null
             ? FilterQuality.low
-            : FilterQuality.medium;
+            : FilterQuality.high;
 
       switch (line.tool) {
         case ToolType.rect:
@@ -1351,6 +1368,15 @@ class DrawingProvider extends ChangeNotifier {
     }
     dense.add(pts.last);
     return dense;
+  }
+
+  void _clearSelectionArea(Canvas canvas, LassoSelection selection) {
+    canvas.drawPath(
+      selection.maskPath,
+      Paint()
+        ..blendMode = BlendMode.clear
+        ..isAntiAlias = true,
+    );
   }
 
   void _paintSelection(Canvas canvas, LassoSelection selection) {
