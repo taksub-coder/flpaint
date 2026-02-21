@@ -82,6 +82,7 @@ class _MyHomePageState extends State<MyHomePage> {
   final GlobalKey _interactiveViewerKey = GlobalKey();
   bool _panelSecondaryPointerDown = false;
   bool _panelPanZoomTracking = false;
+  bool _suspendInteractiveViewerGestures = false;
 
   @override
   void initState() {
@@ -125,6 +126,13 @@ class _MyHomePageState extends State<MyHomePage> {
       ..translate(sceneFocal.dx, sceneFocal.dy)
       ..scale(effectiveScale)
       ..translate(-sceneFocal.dx, -sceneFocal.dy);
+  }
+
+  void _onSelectionHandleInteractionChanged(bool active) {
+    if (_suspendInteractiveViewerGestures == active) return;
+    setState(() {
+      _suspendInteractiveViewerGestures = active;
+    });
   }
 
   Offset _toCanvasPosition(Offset globalPoint) {
@@ -245,8 +253,8 @@ class _MyHomePageState extends State<MyHomePage> {
                         boundaryMargin: const EdgeInsets.all(2000),
                         minScale: 0.1,
                         maxScale: 5.0,
-                        panEnabled: true,
-                        scaleEnabled: true,
+                        panEnabled: !_suspendInteractiveViewerGestures,
+                        scaleEnabled: !_suspendInteractiveViewerGestures,
                         trackpadScrollCausesScale: true,
                         transformationController: _transformationController,
                         child: Padding(
@@ -268,6 +276,8 @@ class _MyHomePageState extends State<MyHomePage> {
                               onTwoFingerPan: _onCanvasTwoFingerPan,
                               onTwoFingerScale: _onCanvasTwoFingerScale,
                               toCanvas: _toCanvasPosition,
+                              onSelectionHandleInteractionChanged:
+                                  _onSelectionHandleInteractionChanged,
                             ),
                           ),
                         ),

@@ -9,11 +9,13 @@ class DrawingCanvas extends StatefulWidget {
   final ValueChanged<Offset>? onTwoFingerPan;
   final void Function(Offset focalPointGlobal, double scaleDelta)? onTwoFingerScale;
   final Offset Function(Offset globalPoint)? toCanvas;
+  final ValueChanged<bool>? onSelectionHandleInteractionChanged;
   const DrawingCanvas({
     super.key,
     this.onTwoFingerPan,
     this.onTwoFingerScale,
     this.toCanvas,
+    this.onSelectionHandleInteractionChanged,
   });
   @override
   State<DrawingCanvas> createState() => _DrawingCanvasState();
@@ -27,6 +29,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   Offset? _lastTwoFingerFocalPoint;
   double? _lastTwoFingerDistance;
   bool _ignoreDrawingGestures = false;
+  int? _activeSelectionPointer;
   //もっと長い距離をかけて細くしたい場合は、以下の定数を大きくします。
   static const double _minHandleDistance = 60.0;// 入り
   static const double _rotationSoftRadius = 80.0;// 抜き（払い）は特にながく
@@ -120,24 +123,96 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     return fallbackLocal ?? globalPosition;
   }
 
+  void _syncIgnoreDrawingGestures() {
+    final bool shouldIgnore =
+        _isTwoFingerTouchActive || _activeSelectionPointer != null;
+    if (_ignoreDrawingGestures == shouldIgnore) return;
+    setState(() {
+      _ignoreDrawingGestures = shouldIgnore;
+    });
+  }
+
+  void _setSelectionHandleInteraction(bool isActive, {int? pointer}) {
+    final bool wasActive = _activeSelectionPointer != null;
+    _activeSelectionPointer = isActive ? pointer : null;
+    if (wasActive != isActive) {
+      widget.onSelectionHandleInteractionChanged?.call(isActive);
+    }
+    _syncIgnoreDrawingGestures();
+  }
+
+  bool _beginSelectionHandleDrag(PointerDownEvent event, DrawingProvider drawing) {
+    if (drawing.currentTool != ToolType.lasso || drawing.selection == null) {
+      return false;
+    }
+    final pos = _toCanvasPosition(
+      event.position,
+      fallbackLocal: event.localPosition,
+    );
+    final handle = drawing.hitTestSelection(
+      pos,
+      handleRadius: 24,
+    );
+    if (handle == SelectionHandle.none) {
+      return false;
+    }
+
+    drawing.beginSelectionInteraction();
+    if (handle == SelectionHandle.mirror) {
+      drawing.flipSelectionHorizontal();
+      return true;
+    }
+
+    final sel = drawing.selection!;
+    _dragState = SelectionDragState(
+      handle: handle,
+      startGlobal: pos,
+      startLocal: sel.toLocal(pos),
+      initialTranslation: sel.translation,
+      initialScaleX: sel.scaleX,
+      initialScaleY: sel.scaleY,
+      initialRotation: sel.rotation,
+    );
+    _setSelectionHandleInteraction(true, pointer: event.pointer);
+    return true;
+  }
+
   void _handlePointerDown(PointerDownEvent event, DrawingProvider drawing) {
-    if (event.kind != ui.PointerDeviceKind.touch) return;
-    _activeTouchPoints[event.pointer] = event.position;
-    if (_isTwoFingerTouchActive) {
-      if (!_ignoreDrawingGestures) {
-        setState(() {
-          _ignoreDrawingGestures = true;
-        });
+    if (event.kind == ui.PointerDeviceKind.touch) {
+      _activeTouchPoints[event.pointer] = event.position;
+      if (_isTwoFingerTouchActive) {
+        _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
+        _lastTwoFingerDistance = _twoFingerDistance();
+        _cancelDrawingForTwoFinger(drawing);
+        _syncIgnoreDrawingGestures();
+        return;
       }
-      _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
-      _lastTwoFingerDistance = _twoFingerDistance();
-      _cancelDrawingForTwoFinger(drawing);
+    }
+
+    if (_activeSelectionPointer != null || _isTwoFingerTouchActive) {
+      return;
+    }
+
+    if (_beginSelectionHandleDrag(event, drawing)) {
+      _syncIgnoreDrawingGestures();
     }
   }
 
   void _handlePointerMove(PointerMoveEvent event, DrawingProvider drawing) {
+    if (_activeSelectionPointer == event.pointer) {
+      final pos = _toCanvasPosition(
+        event.position,
+        fallbackLocal: event.localPosition,
+      );
+      if (_dragState != null && drawing.selection != null) {
+        _updateSelectionTransform(pos, drawing);
+      }
+      return;
+    }
+
     if (!_activeTouchPoints.containsKey(event.pointer)) return;
     _activeTouchPoints[event.pointer] = event.position;
+    if (_activeSelectionPointer != null) return;
     if (_isTwoFingerTouchActive) {
       final focal = _twoFingerFocalPoint();
       final distance = _twoFingerDistance();
@@ -162,6 +237,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _handlePointerUpOrCancel(PointerEvent event) {
+    if (_activeSelectionPointer == event.pointer) {
+      _dragState = null;
+      _setSelectionHandleInteraction(false);
+    }
+
     _activeTouchPoints.remove(event.pointer);
     if (_isTwoFingerTouchActive) {
       _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
@@ -169,15 +249,12 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     } else {
       _lastTwoFingerFocalPoint = null;
       _lastTwoFingerDistance = null;
-      if (_ignoreDrawingGestures) {
-        setState(() {
-          _ignoreDrawingGestures = false;
-        });
-      }
     }
+    _syncIgnoreDrawingGestures();
   }
 
   Future<void> _handleTapDown(TapDownDetails details, DrawingProvider drawing) async {
+    if (_activeSelectionPointer != null) return;
     final pos = _toCanvasPosition(
       details.globalPosition,
       fallbackLocal: details.localPosition,
@@ -202,6 +279,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       _dragState = null;
       return;
     }
+    if (_activeSelectionPointer != null) {
+      _lastOffset = null;
+      return;
+    }
     final pos = _toCanvasPosition(
       details.globalPosition,
       fallbackLocal: details.localPosition,
@@ -209,7 +290,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _lastOffset = pos;
     if (drawing.currentTool == ToolType.lasso) {
       if (drawing.selection != null) {
-        final handle = drawing.hitTestSelection(pos);
+        final handle = drawing.hitTestSelection(
+          pos,
+          handleRadius: 24,
+        );
         if (handle != SelectionHandle.none) {
           drawing.beginSelectionInteraction();
           if (handle == SelectionHandle.mirror) {
@@ -239,6 +323,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _handlePanUpdate(DragUpdateDetails details, DrawingProvider drawing) {
     if (_isTwoFingerTouchActive) return;
+    if (_activeSelectionPointer != null) return;
     final pos = _toCanvasPosition(
       details.globalPosition,
       fallbackLocal: details.localPosition,
@@ -262,6 +347,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   Future<void> _handlePanEnd(DrawingProvider drawing) async {
     if (_isTwoFingerTouchActive) {
       _dragState = null;
+      _lastOffset = null;
+      return;
+    }
+    if (_activeSelectionPointer != null) {
       _lastOffset = null;
       return;
     }

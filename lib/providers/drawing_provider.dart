@@ -1085,7 +1085,7 @@ class DrawingProvider extends ChangeNotifier {
 
   SelectionHandle hitTestSelection(
     Offset position, {
-    double handleRadius = 18,
+    double handleRadius = 24,
     double mirrorRadius = 32,
   }) {
     if (_selection == null) return SelectionHandle.none;
