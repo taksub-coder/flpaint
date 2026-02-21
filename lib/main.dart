@@ -1,4 +1,4 @@
-// flpaint_プロトタイプE.2i_トーン実装版
+// flpaint_プロトタイプF1.0_トーンモアレ修正完成版
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
