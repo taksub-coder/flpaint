@@ -97,6 +97,8 @@ class DrawingProvider extends ChangeNotifier {
   static const double _pressureTaperInBase = 14.0;
   static const double _pressureTaperOutBase = 14.0;
   static const Size _ioCanvasSize = Size(768, 1024);
+  static const int _toneTileSize = 2;
+  static const int _toneSuperSampleScale = 4;
   static final Float64List _toneShaderMatrixRotated = (() {
     final c = math.cos(math.pi / 4);
     final s = math.sin(math.pi / 4);
@@ -156,12 +158,13 @@ class DrawingProvider extends ChangeNotifier {
   Future<ui.Image> _createToneTileImage({
     required int blackPixels,
   }) async {
-    const int tileSize = 2;
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawColor(Colors.transparent, BlendMode.src);
+    final int sourceSize = _toneTileSize * _toneSuperSampleScale;
+    final double sourceScale = _toneSuperSampleScale.toDouble();
+    final sourceRecorder = ui.PictureRecorder();
+    final sourceCanvas = Canvas(sourceRecorder);
+    sourceCanvas.drawColor(Colors.transparent, BlendMode.src);
     final dotPaint = Paint()
-      ..color = Colors.black
+      ..color = const Color(0xF2010101)
       ..isAntiAlias = false;
 
     final pixels = <Offset>[];
@@ -176,13 +179,33 @@ class DrawingProvider extends ChangeNotifier {
     }
 
     for (final pixel in pixels) {
-      canvas.drawRect(
-        Rect.fromLTWH(pixel.dx, pixel.dy, 1, 1),
+      sourceCanvas.drawRect(
+        Rect.fromLTWH(
+          pixel.dx * sourceScale,
+          pixel.dy * sourceScale,
+          sourceScale,
+          sourceScale,
+        ),
         dotPaint,
       );
     }
-    final picture = recorder.endRecording();
-    return picture.toImage(tileSize, tileSize);
+
+    final sourcePicture = sourceRecorder.endRecording();
+    final sourceImage = await sourcePicture.toImage(sourceSize, sourceSize);
+
+    final downsampleRecorder = ui.PictureRecorder();
+    final downsampleCanvas = Canvas(downsampleRecorder);
+    downsampleCanvas.drawColor(Colors.transparent, BlendMode.src);
+    downsampleCanvas.drawImageRect(
+      sourceImage,
+      Rect.fromLTWH(0, 0, sourceSize.toDouble(), sourceSize.toDouble()),
+      Rect.fromLTWH(0, 0, _toneTileSize.toDouble(), _toneTileSize.toDouble()),
+      Paint()
+        ..isAntiAlias = false
+        ..filterQuality = FilterQuality.medium,
+    );
+    final downsamplePicture = downsampleRecorder.endRecording();
+    return downsamplePicture.toImage(_toneTileSize, _toneTileSize);
   }
 
   void setTool(ToolType tool) {
@@ -1175,7 +1198,7 @@ class DrawingProvider extends ChangeNotifier {
         ..strokeJoin = StrokeJoin.round
         ..filterQuality = toneShader == null
             ? FilterQuality.low
-            : FilterQuality.none;
+            : FilterQuality.medium;
 
       switch (line.tool) {
         case ToolType.rect:
