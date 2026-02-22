@@ -30,6 +30,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   double? _lastTwoFingerDistance;
   bool _ignoreDrawingGestures = false;
   int? _activeSelectionPointer;
+  int? _activeDrawPointer;
+  Offset? _pendingDrawStart;
+  bool _activeDrawStarted = false;
   //もっと長い距離をかけて細くしたい場合は、以下の定数を大きくします。
   static const double _minHandleDistance = 60.0;// 入り
   static const double _rotationSoftRadius = 80.0;// 抜き（払い）は特にながく
@@ -51,8 +54,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
             return Listener(
               onPointerDown: (event) => _handlePointerDown(event, drawing),
               onPointerMove: (event) => _handlePointerMove(event, drawing),
-              onPointerUp: _handlePointerUpOrCancel,
-              onPointerCancel: _handlePointerUpOrCancel,
+              onPointerUp: (event) => _handlePointerUpOrCancel(event, drawing),
+              onPointerCancel: (event) => _handlePointerUpOrCancel(event, drawing),
               child: IgnorePointer(
                 ignoring: _ignoreDrawingGestures,
                 child: GestureDetector(
@@ -112,6 +115,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   void _cancelDrawingForTwoFinger(DrawingProvider drawing) {
     _dragState = null;
     _lastOffset = null;
+    _activeDrawPointer = null;
+    _pendingDrawStart = null;
+    _activeDrawStarted = false;
     drawing.cancelCurrentLine();
   }
 
@@ -125,7 +131,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _syncIgnoreDrawingGestures() {
     final bool shouldIgnore =
-        _isTwoFingerTouchActive || _activeSelectionPointer != null;
+        _isTwoFingerTouchActive ||
+        _activeSelectionPointer != null ||
+        _activeDrawPointer != null;
     if (_ignoreDrawingGestures == shouldIgnore) return;
     setState(() {
       _ignoreDrawingGestures = shouldIgnore;
@@ -177,6 +185,26 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     return true;
   }
 
+  bool _beginPointerDrawing(PointerDownEvent event, DrawingProvider drawing) {
+    if (drawing.currentTool == ToolType.lasso && drawing.selection != null) {
+      return false;
+    }
+    final pos = _toCanvasPosition(
+      event.position,
+      fallbackLocal: event.localPosition,
+    );
+    _activeDrawPointer = event.pointer;
+    _lastOffset = pos;
+    _pendingDrawStart = pos;
+    _activeDrawStarted = false;
+    if (drawing.currentTool == ToolType.lasso) {
+      drawing.startLasso(pos);
+      _activeDrawStarted = true;
+    }
+    _syncIgnoreDrawingGestures();
+    return true;
+  }
+
   void _handlePointerDown(PointerDownEvent event, DrawingProvider drawing) {
     if (event.kind == ui.PointerDeviceKind.touch) {
       _activeTouchPoints[event.pointer] = event.position;
@@ -189,13 +217,17 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       }
     }
 
-    if (_activeSelectionPointer != null || _isTwoFingerTouchActive) {
+    if (_activeSelectionPointer != null ||
+        _activeDrawPointer != null ||
+        _isTwoFingerTouchActive) {
       return;
     }
 
     if (_beginSelectionHandleDrag(event, drawing)) {
       _syncIgnoreDrawingGestures();
+      return;
     }
+    _beginPointerDrawing(event, drawing);
   }
 
   void _handlePointerMove(PointerMoveEvent event, DrawingProvider drawing) {
@@ -207,6 +239,28 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       if (_dragState != null && drawing.selection != null) {
         _updateSelectionTransform(pos, drawing);
       }
+      return;
+    }
+
+    if (_activeDrawPointer == event.pointer) {
+      final pos = _toCanvasPosition(
+        event.position,
+        fallbackLocal: event.localPosition,
+      );
+      if (drawing.currentTool == ToolType.lasso) {
+        if (drawing.isDrawingLasso) {
+          drawing.extendLasso(pos);
+        }
+      } else {
+        if (!_activeDrawStarted) {
+          drawing.startNewLine(_pendingDrawStart ?? pos);
+          _activeDrawStarted = true;
+        }
+        if (_lastOffset != null) {
+          drawing.addPoint(pos, _lastOffset!);
+        }
+      }
+      _lastOffset = pos;
       return;
     }
 
@@ -236,10 +290,25 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     }
   }
 
-  void _handlePointerUpOrCancel(PointerEvent event) {
+  void _handlePointerUpOrCancel(PointerEvent event, DrawingProvider drawing) {
     if (_activeSelectionPointer == event.pointer) {
       _dragState = null;
       _setSelectionHandleInteraction(false);
+    }
+
+    if (_activeDrawPointer == event.pointer) {
+      if (drawing.currentTool == ToolType.lasso) {
+        if (drawing.isDrawingLasso && _canvasSize != null) {
+          drawing.finishLasso(_canvasSize!);
+        }
+        _dragState = null;
+      } else if (_activeDrawStarted) {
+        drawing.endLine();
+      }
+      _activeDrawPointer = null;
+      _pendingDrawStart = null;
+      _activeDrawStarted = false;
+      _lastOffset = null;
     }
 
     _activeTouchPoints.remove(event.pointer);
@@ -254,7 +323,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   Future<void> _handleTapDown(TapDownDetails details, DrawingProvider drawing) async {
-    if (_activeSelectionPointer != null) return;
+    if (_activeSelectionPointer != null || _activeDrawPointer != null) return;
     final pos = _toCanvasPosition(
       details.globalPosition,
       fallbackLocal: details.localPosition,
@@ -277,6 +346,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     if (_isTwoFingerTouchActive) {
       _lastOffset = null;
       _dragState = null;
+      return;
+    }
+    if (_activeDrawPointer != null) {
       return;
     }
     if (_activeSelectionPointer != null) {
@@ -323,6 +395,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _handlePanUpdate(DragUpdateDetails details, DrawingProvider drawing) {
     if (_isTwoFingerTouchActive) return;
+    if (_activeDrawPointer != null) return;
     if (_activeSelectionPointer != null) return;
     final pos = _toCanvasPosition(
       details.globalPosition,
@@ -348,6 +421,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     if (_isTwoFingerTouchActive) {
       _dragState = null;
       _lastOffset = null;
+      return;
+    }
+    if (_activeDrawPointer != null) {
       return;
     }
     if (_activeSelectionPointer != null) {

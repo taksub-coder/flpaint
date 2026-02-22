@@ -59,7 +59,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Drawing App',
+      title: 'FLPaint',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,
@@ -78,6 +78,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  static const double _canvasViewportPadding = 500.0;
   final TransformationController _transformationController = TransformationController();
   final GlobalKey _interactiveViewerKey = GlobalKey();
   bool _panelSecondaryPointerDown = false;
@@ -95,7 +96,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void _alignToTopLeft() {
     // スケール1.0で左上に寄せる（翻訳を0にセット）
     _transformationController.value = Matrix4.identity()
-      ..translate(-500.0, -500.0)  // 左上座標を(0,0)に固定
+      ..translate(-_canvasViewportPadding, -_canvasViewportPadding)  // 左上座標を(0,0)に固定
       ..scale(1.0);          // スケールは1.0（キャンバス原寸）
   }
 
@@ -142,7 +143,7 @@ class _MyHomePageState extends State<MyHomePage> {
     if (renderObject is! RenderBox) return globalPoint;
     final localPoint = renderObject.globalToLocal(globalPoint);
     final scenePoint = _transformationController.toScene(localPoint);
-    return scenePoint - const Offset(500.0, 500.0);
+    return scenePoint - const Offset(_canvasViewportPadding, _canvasViewportPadding);
   }
 
   @override
@@ -222,7 +223,7 @@ class _MyHomePageState extends State<MyHomePage> {
         preferredSize: const Size.fromHeight(kToolbarHeight),
         child: _buildWindowMovablePanel(
           child: AppBar(
-        title: const Text('Drawing App'),
+        title: const Text('FLPaint'),
         actions: [
           IconButton(icon: const Icon(Icons.undo), onPressed: drawingProvider.undo),
           IconButton(icon: const Icon(Icons.redo), onPressed: drawingProvider.redo),
@@ -258,7 +259,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         trackpadScrollCausesScale: true,
                         transformationController: _transformationController,
                         child: Padding(
-                          padding: const EdgeInsets.all(500.0), // 広大な余白でズームアウト対応
+                          padding: const EdgeInsets.all(_canvasViewportPadding), // 広大な余白でズームアウト対応
                           child: Container(
                             width: 768,
                             height: 1024,
