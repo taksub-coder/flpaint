@@ -1,4 +1,4 @@
-// flpaint_プロトタイプF1.0_トーンモアレ修正＿描始め座標修正完成版
+// flpaint_プロトタイプF1.1_CP実装版
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
