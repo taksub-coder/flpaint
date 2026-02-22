@@ -17,12 +17,18 @@ class _DrawingSnapshot {
   final ui.Image? layerABaseImage;
   final ui.Image? layerBBaseImage;
   final LassoSelection? selection;
+  final bool selectionMasksSource;
+  final bool selectionHandlesFilled;
+  final bool selectionMergeToActiveLayer;
 
   _DrawingSnapshot({
     required this.lines,
     required this.layerABaseImage,
     required this.layerBBaseImage,
     required this.selection,
+    required this.selectionMasksSource,
+    required this.selectionHandlesFilled,
+    required this.selectionMergeToActiveLayer,
   });
 }
 
@@ -52,6 +58,10 @@ class DrawingProvider extends ChangeNotifier {
   final List<Offset> _lassoPoints = [];
   bool _isDrawingLasso = false;
   LassoSelection? _selection;
+  bool _selectionMasksSource = true;
+  bool _selectionHandlesFilled = false;
+  bool _selectionMergeToActiveLayer = false;
+  ui.Image? _clipboardImage;
 
   // Shapes
   Offset? _shapeStart;
@@ -84,6 +94,8 @@ class DrawingProvider extends ChangeNotifier {
   List<Offset> get lassoDraft => List.unmodifiable(_lassoPoints);
   bool get isDrawingLasso => _isDrawingLasso;
   LassoSelection? get selection => _selection;
+  bool get selectionMasksSource => _selectionMasksSource;
+  bool get selectionHandlesFilled => _selectionHandlesFilled;
   Offset? get shapeStart => _shapeStart;
   Offset? get shapeEnd => _shapeEnd;
 
@@ -459,7 +471,9 @@ class DrawingProvider extends ChangeNotifier {
     }
     _drawLines(canvas, size, layer: layer);
     if (_selection != null && _selection!.layer == layer) {
-      _clearSelectionArea(canvas, _selection!);
+      if (_selectionMasksSource) {
+        _clearSelectionArea(canvas, _selection!);
+      }
       _paintSelection(canvas, _selection!);
     }
     canvas.restore();
@@ -506,7 +520,7 @@ class DrawingProvider extends ChangeNotifier {
     _lineStartPoint = null;
     _lassoPoints.clear();
     _isDrawingLasso = false;
-    _selection = null;
+    _resetSelectionState();
     _layerABaseImage = null;
     _layerBBaseImage = null;
     _shapeStart = null;
@@ -531,6 +545,14 @@ class DrawingProvider extends ChangeNotifier {
   void _clearLayerLines(DrawingLayer layer) {
     _lines.removeWhere((line) => line.layer == layer);
   }
+
+  void _resetSelectionState() {
+    _selection = null;
+    _selectionMasksSource = true;
+    _selectionHandlesFilled = false;
+    _selectionMergeToActiveLayer = false;
+  }
+
   void _terminateLassoSession() {
     if (_isDrawingLasso) {
       _lassoPoints.clear();
@@ -540,7 +562,7 @@ class DrawingProvider extends ChangeNotifier {
       if (_canvasSize != Size.zero) {
         unawaited(commitSelection());
       } else {
-        _selection = null;
+        _resetSelectionState();
         notifyListeners();
       }
     }
@@ -647,6 +669,9 @@ class DrawingProvider extends ChangeNotifier {
       layerABaseImage: _layerABaseImage,
       layerBBaseImage: _layerBBaseImage,
       selection: _cloneSelection(_selection),
+      selectionMasksSource: _selectionMasksSource,
+      selectionHandlesFilled: _selectionHandlesFilled,
+      selectionMergeToActiveLayer: _selectionMergeToActiveLayer,
     );
   }
 
@@ -657,6 +682,9 @@ class DrawingProvider extends ChangeNotifier {
     _layerABaseImage = snapshot.layerABaseImage;
     _layerBBaseImage = snapshot.layerBBaseImage;
     _selection = _cloneSelection(snapshot.selection);
+    _selectionMasksSource = snapshot.selectionMasksSource;
+    _selectionHandlesFilled = snapshot.selectionHandlesFilled;
+    _selectionMergeToActiveLayer = snapshot.selectionMergeToActiveLayer;
   }
 
   DrawnLine _cloneLine(DrawnLine src) {
@@ -991,6 +1019,9 @@ class DrawingProvider extends ChangeNotifier {
       layer: layer,
       baseRect: bounds,
     );
+    _selectionMasksSource = true;
+    _selectionHandlesFilled = false;
+    _selectionMergeToActiveLayer = false;
     notifyListeners();
   }
 
@@ -1040,6 +1071,75 @@ class DrawingProvider extends ChangeNotifier {
     );
     final downsamplePicture = downsampleRecorder.endRecording();
     return downsamplePicture.toImage(bounds.width.ceil(), bounds.height.ceil());
+  }
+
+  Future<void> cutSelectionToClipboard() async {
+    if (_selection == null || _canvasSize == Size.zero) return;
+    _saveState();
+    final LassoSelection selection = _selection!;
+    _clipboardImage = selection.image;
+
+    final ui.Image cutLayer = await _renderLayerWithClearedSelection(
+      _canvasSize,
+      selection.layer,
+      selection,
+    );
+    _setLayerBaseImage(selection.layer, cutLayer);
+    _clearLayerLines(selection.layer);
+    _resetSelectionState();
+    notifyListeners();
+  }
+
+  Future<void> copyPasteSelection() async {
+    if (_selection != null) {
+      _saveState();
+      _clipboardImage = _selection!.image;
+      _selectionMasksSource = false;
+      _selectionHandlesFilled = true;
+      _selectionMergeToActiveLayer = true;
+      notifyListeners();
+      return;
+    }
+
+    if (_clipboardImage == null) return;
+    _saveState();
+    final ui.Image image = _clipboardImage!;
+    final Size canvasSize = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    final Rect baseRect = Rect.fromLTWH(
+      (canvasSize.width - image.width.toDouble()) / 2,
+      (canvasSize.height - image.height.toDouble()) / 2,
+      image.width.toDouble(),
+      image.height.toDouble(),
+    );
+    _selection = LassoSelection(
+      image: image,
+      maskPath: Path()..addRect(baseRect),
+      layer: _activeLayer,
+      baseRect: baseRect,
+    );
+    _selectionMasksSource = false;
+    _selectionHandlesFilled = true;
+    _selectionMergeToActiveLayer = true;
+    _tool = ToolType.lasso;
+    notifyListeners();
+  }
+
+  Future<ui.Image> _renderLayerWithClearedSelection(
+    Size size,
+    DrawingLayer layer,
+    LassoSelection selection,
+  ) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+    final layerBaseImage = _getLayerBaseImage(layer);
+    if (layerBaseImage != null) {
+      canvas.drawImage(layerBaseImage, Offset.zero, Paint());
+    }
+    _drawLines(canvas, size, layer: layer);
+    _clearSelectionArea(canvas, selection);
+    final picture = recorder.endRecording();
+    return picture.toImage(size.width.ceil(), size.height.ceil());
   }
 
   // Selection manipulation
@@ -1156,15 +1256,29 @@ class DrawingProvider extends ChangeNotifier {
   Future<void> commitSelection() async {
     if (_selection == null || _canvasSize == Size.zero) return;
     _saveState();
-    final DrawingLayer layer = _selection!.layer;
-    final ui.Image merged = await _renderLayerWithSelection(_canvasSize, layer);
+    final LassoSelection selection = _selection!;
+    final DrawingLayer layer =
+        _selectionMergeToActiveLayer ? _activeLayer : selection.layer;
+    final bool clearSelectionArea =
+        _selectionMasksSource && selection.layer == layer;
+    final ui.Image merged = await _renderLayerWithSelection(
+      _canvasSize,
+      layer,
+      selection: selection,
+      clearSelectionArea: clearSelectionArea,
+    );
     _setLayerBaseImage(layer, merged);
-    _selection = null;
     _clearLayerLines(layer);
+    _resetSelectionState();
     notifyListeners();
   }
 
-  Future<ui.Image> _renderLayerWithSelection(Size size, DrawingLayer layer) async {
+  Future<ui.Image> _renderLayerWithSelection(
+    Size size,
+    DrawingLayer layer, {
+    required LassoSelection selection,
+    required bool clearSelectionArea,
+  }) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
@@ -1173,10 +1287,10 @@ class DrawingProvider extends ChangeNotifier {
       canvas.drawImage(layerBaseImage, Offset.zero, Paint());
     }
     _drawLines(canvas, size, layer: layer);
-    if (_selection != null && _selection!.layer == layer) {
-      _clearSelectionArea(canvas, _selection!);
-      _paintSelection(canvas, _selection!);
+    if (clearSelectionArea) {
+      _clearSelectionArea(canvas, selection);
     }
+    _paintSelection(canvas, selection);
     final picture = recorder.endRecording();
     return picture.toImage(size.width.ceil(), size.height.ceil());
   }

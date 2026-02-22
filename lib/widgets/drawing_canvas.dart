@@ -79,6 +79,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       tone60Shader: drawing.tone60Shader,
                       tone80Shader: drawing.tone80Shader,
                       selection: drawing.selection,
+                      selectionMasksSource: drawing.selectionMasksSource,
+                      selectionHandlesFilled: drawing.selectionHandlesFilled,
                       lassoDraft: drawing.lassoDraft,
                       isDrawingLasso: drawing.isDrawingLasso,
                       handles: drawing.getSelectionHandles(),
@@ -586,6 +588,8 @@ class DrawingPainter extends CustomPainter {
   final ui.ImageShader? tone60Shader;
   final ui.ImageShader? tone80Shader;
   final LassoSelection? selection;
+  final bool selectionMasksSource;
+  final bool selectionHandlesFilled;
   final List<Offset> lassoDraft;
   final bool isDrawingLasso;
   final Map<SelectionHandle, Offset> handles;
@@ -606,6 +610,8 @@ class DrawingPainter extends CustomPainter {
     required this.tone60Shader,
     required this.tone80Shader,
     required this.selection,
+    required this.selectionMasksSource,
+    required this.selectionHandlesFilled,
     required this.lassoDraft,
     required this.isDrawingLasso,
     required this.handles,
@@ -619,10 +625,14 @@ class DrawingPainter extends CustomPainter {
     // ★ ここを削除（またはコメントアウト） ★
     // canvas.drawColor(Colors.white, BlendMode.srcOver);
 
-    final Path? layerAHolePath = selection != null && selection!.layer == DrawingLayer.layerA
+    final Path? layerAHolePath = selectionMasksSource &&
+            selection != null &&
+            selection!.layer == DrawingLayer.layerA
         ? selection!.maskPath
         : null;
-    final Path? layerBHolePath = selection != null && selection!.layer == DrawingLayer.layerB
+    final Path? layerBHolePath = selectionMasksSource &&
+            selection != null &&
+            selection!.layer == DrawingLayer.layerB
         ? selection!.maskPath
         : null;
 
@@ -845,7 +855,7 @@ class DrawingPainter extends CustomPainter {
     // Handles
     const double handleSize = 12;
     final handleFillPaint = Paint()
-      ..color = Colors.white
+      ..color = selectionHandlesFilled ? Colors.black : Colors.white
       ..style = PaintingStyle.fill;
     final handleStrokePaint = Paint()
       ..color = Colors.black

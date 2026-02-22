@@ -84,6 +84,20 @@ class ToolSidebar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _ToolButton(
+                  label: 'C',
+                  tooltip: 'Cut selection',
+                  selected: false,
+                  onTap: () => drawing.cutSelectionToClipboard(),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: 'P',
+                  tooltip: 'Copy & paste selection',
+                  selected: false,
+                  onTap: () => drawing.copyPasteSelection(),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
                   label: '30',
                   tooltip: 'Tone 30%',
                   selected: selected == ToolType.tone30,
