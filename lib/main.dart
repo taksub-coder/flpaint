@@ -1,4 +1,4 @@
-// flpaint_プロトタイプF1.2_鏡像改修版
+// flpaint_プロトタイプF1.4_画角修正版
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -24,22 +24,20 @@ void main() async {
 
     // ウィンドウオプションを設定
     WindowOptions windowOptions = const WindowOptions(
-      size: Size(838, 980),           // キャンバス768 + サイドバー70 + 余裕
       minimumSize: Size(480, 800),
       maximumSize: Size(3000, 3000),   // 必要に応じて大きく
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
-      title: 'FLPaint - プロトタイプE.2g',
+      title: 'FLPaint - プロトタイプF1.4_画角修正版',
       // 必要に応じて windowButtonVisibility: false, などを追加可能
     );
 
     // ウィンドウを表示・フォーカスするまで待機
     windowManager.waitUntilReadyToShow(windowOptions, () async {
-      // 追加でサイズを確実に適用（最新版で安定する書き方）
-      await windowManager.setSize(const Size(838, 980));
+      // 起動時に最大化して、画面サイズにフィットさせる
+      await windowManager.maximize();
       await windowManager.setMinimumSize(const Size(480, 800));
-      await windowManager.center();
       await windowManager.show();
       await windowManager.focus();
     });
@@ -59,7 +57,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'FLPaint',
+      title: 'FLPaint-プロトタイプF1.4',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,
