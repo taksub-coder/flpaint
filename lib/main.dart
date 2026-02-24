@@ -1,4 +1,4 @@
-// flpaint_プロトタイプF1.1_CP実装版
+// flpaint_プロトタイプF1.2_鏡像改修版
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
