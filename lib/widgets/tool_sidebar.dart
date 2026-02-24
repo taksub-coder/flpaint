@@ -91,7 +91,7 @@ class ToolSidebar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _ToolButton(
-                  label: 'P',
+                  label: 'CP',
                   tooltip: 'Copy & paste selection',
                   selected: false,
                   onTap: () => drawing.copyPasteSelection(),
