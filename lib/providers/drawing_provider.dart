@@ -1169,7 +1169,16 @@ class DrawingProvider extends ChangeNotifier {
       (corners[3].dy + corners[0].dy) / 2,
     );
     // Mirror toggle: fix to visual top-left of the transformed bounds so it doesn't jump when flipped.
-    handles[SelectionHandle.mirror] = bounds.topLeft + const Offset(-8, -12);
+    Offset visualTopLeft = corners.first;
+    for (final corner in corners.skip(1)) {
+      // Find the corner with the minimum y, breaking ties with minimum x.
+      if (corner.dy < visualTopLeft.dy) {
+        visualTopLeft = corner;
+      } else if ((corner.dy - visualTopLeft.dy).abs() < 0.1 && corner.dx < visualTopLeft.dx) {
+        visualTopLeft = corner;
+      }
+    }
+    handles[SelectionHandle.mirror] = visualTopLeft + const Offset(-8, -12);
     return handles;
   }
 
@@ -1186,7 +1195,7 @@ class DrawingProvider extends ChangeNotifier {
   SelectionHandle hitTestSelection(
     Offset position, {
     double handleRadius = 24,
-    double mirrorRadius = 32,
+    double mirrorRadius = 64,
   }) {
     if (_selection == null) return SelectionHandle.none;
     final handles = _handlePositions(_selection!);

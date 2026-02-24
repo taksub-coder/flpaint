@@ -33,6 +33,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   int? _activeDrawPointer;
   Offset? _pendingDrawStart;
   bool _activeDrawStarted = false;
+  DateTime? _lastFlipTime;
+  Offset? _tapDownPosition;
+  static const Duration _flipDebounceDuration = Duration(milliseconds: 500);
   //もっと長い距離をかけて細くしたい場合は、以下の定数を大きくします。
   static const double _minHandleDistance = 60.0;// 入り
   static const double _rotationSoftRadius = 80.0;// 抜き（払い）は特にながく
@@ -60,7 +63,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                 ignoring: _ignoreDrawingGestures,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTapDown: (details) => _handleTapDown(details, drawing),
+                  onTapDown: (details) => _handleTapDown(details),
+                  onTap: () => _handleTap(drawing),
                   onPanStart: (details) => _handlePanStart(details, drawing),
                   onPanUpdate: (details) => _handlePanUpdate(details, drawing),
                   onPanEnd: (_) => _handlePanEnd(drawing),
@@ -166,12 +170,19 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     if (handle == SelectionHandle.none) {
       return false;
     }
-
-    drawing.beginSelectionInteraction();
     if (handle == SelectionHandle.mirror) {
-      drawing.flipSelectionHorizontal();
+      final now = DateTime.now();
+      if (_lastFlipTime == null ||
+          now.difference(_lastFlipTime!) > _flipDebounceDuration) {
+        drawing.flipSelectionHorizontal();
+        _lastFlipTime = now;
+      }
+      _dragState = null;
+      _setSelectionHandleInteraction(true, pointer: event.pointer);
       return true;
     }
+
+    drawing.beginSelectionInteraction();
 
     final sel = drawing.selection!;
     _dragState = SelectionDragState(
@@ -324,17 +335,32 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _syncIgnoreDrawingGestures();
   }
 
-  Future<void> _handleTapDown(TapDownDetails details, DrawingProvider drawing) async {
-    if (_activeSelectionPointer != null || _activeDrawPointer != null) return;
-    final pos = _toCanvasPosition(
+  void _handleTapDown(TapDownDetails details) {
+    if (_activeSelectionPointer != null || _activeDrawPointer != null) {
+      _tapDownPosition = null;
+      return;
+    }
+    _tapDownPosition = _toCanvasPosition(
       details.globalPosition,
       fallbackLocal: details.localPosition,
     );
+  }
+
+  Future<void> _handleTap(DrawingProvider drawing) async {
+    final pos = _tapDownPosition;
+    if (pos == null) return;
+    _tapDownPosition = null;
+
     if (drawing.currentTool == ToolType.lasso && drawing.selection != null) {
       final handle = drawing.hitTestSelection(pos);
       if (handle == SelectionHandle.mirror) {
-        drawing.beginSelectionInteraction();
-        drawing.flipSelectionHorizontal();
+        final now = DateTime.now();
+        if (_lastFlipTime == null ||
+            now.difference(_lastFlipTime!) > _flipDebounceDuration) {
+          drawing.beginSelectionInteraction();
+          drawing.flipSelectionHorizontal();
+          _lastFlipTime = now;
+        }
         return;
       }
       if (handle == SelectionHandle.none &&
@@ -368,12 +394,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           pos,
           handleRadius: 24,
         );
-        if (handle != SelectionHandle.none) {
+        if (handle != SelectionHandle.none && handle != SelectionHandle.mirror) {
           drawing.beginSelectionInteraction();
-          if (handle == SelectionHandle.mirror) {
-            drawing.flipSelectionHorizontal();
-            return;
-          }
           final sel = drawing.selection!;
           _dragState = SelectionDragState(
             handle: handle,
@@ -484,9 +506,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         );
         break;
       case SelectionHandle.mirror:
-        // Mirror toggle handled on tap/drag start; avoid continuous updates.
-        drawing.flipSelectionHorizontal();
-        _dragState = null;
+        // Do nothing on drag
         break;
       case SelectionHandle.cornerTL:
       case SelectionHandle.cornerTR:
@@ -875,7 +895,7 @@ class DrawingPainter extends CustomPainter {
     // Mirror button: draw ◀▷ text in system font inside a small rounded rect
     if (handles.containsKey(SelectionHandle.mirror)) {
       final pos = handles[SelectionHandle.mirror]!;
-      final rect = Rect.fromCenter(center: pos, width: 24, height: 20);
+      final rect = Rect.fromCenter(center: pos, width: 48, height: 40);
       final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(4));
       final bg = Paint()..color = Colors.white;
       canvas.drawRRect(rrect, bg);
@@ -883,7 +903,7 @@ class DrawingPainter extends CustomPainter {
       final textPainter = TextPainter(
         text: const TextSpan(
           text: '◀▷',
-          style: TextStyle(fontSize: 12, color: Colors.black),
+          style: TextStyle(fontSize: 20, color: Colors.black),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
