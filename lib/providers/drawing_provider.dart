@@ -32,6 +32,18 @@ class _DrawingSnapshot {
   });
 }
 
+class _VerticalTextColumn {
+  final TextPainter painter;
+  final double width;
+  final double height;
+
+  _VerticalTextColumn({
+    required this.painter,
+    required this.width,
+    required this.height,
+  });
+}
+
 class DrawingProvider extends ChangeNotifier {
   final List<DrawnLine> _lines = [];
   DrawnLine? _currentLine;
@@ -333,7 +345,7 @@ class DrawingProvider extends ChangeNotifier {
       await FlutterFileDialog.saveFile(
         params: SaveFileDialogParams(
           data: encoded,
-          fileName: exportJpeg ? 'flpaint.jpg' : 'flpaint.png',
+          fileName: _buildTimestampedExportFileName(exportJpeg: exportJpeg),
           mimeTypesFilter: [
             exportJpeg ? 'image/jpeg' : 'image/png',
           ],
@@ -344,8 +356,40 @@ class DrawingProvider extends ChangeNotifier {
 
     final ui.Image merged = await _renderExportImage(_ioCanvasSize);
 
+    if (Platform.isWindows) {
+      if (context != null && !context.mounted) return;
+      final bool? exportJpeg = await _selectWindowsExportIsJpeg(context);
+      if (exportJpeg == null) return;
+      final FileSaveLocation? location = await getSaveLocation(
+        suggestedName: _buildTimestampedExportFileName(exportJpeg: exportJpeg),
+        acceptedTypeGroups: [
+          exportJpeg
+              ? const XTypeGroup(
+                  label: 'JPEG',
+                  extensions: ['jpg', 'jpeg'],
+                )
+              : const XTypeGroup(
+                  label: 'PNG',
+                  extensions: ['png'],
+                ),
+        ],
+      );
+      if (location == null) return;
+      final String savePath = _normalizeExportPathForFormat(
+        location.path,
+        exportJpeg: exportJpeg,
+      );
+      final Uint8List? encoded = await _encodeExportImage(
+        merged,
+        exportJpeg: exportJpeg,
+      );
+      if (encoded == null) return;
+      await File(savePath).writeAsBytes(encoded, flush: true);
+      return;
+    }
+
     final FileSaveLocation? location = await getSaveLocation(
-      suggestedName: 'flpaint.png',
+      suggestedName: _buildTimestampedExportFileName(exportJpeg: false),
       acceptedTypeGroups: const [
         XTypeGroup(
           label: 'PNG',
@@ -391,6 +435,32 @@ class DrawingProvider extends ChangeNotifier {
       },
     );
     return exportJpeg ?? false;
+  }
+
+  Future<bool?> _selectWindowsExportIsJpeg(BuildContext? context) async {
+    if (context == null) return false;
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Export format'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('PNG'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('JPG'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<ui.Image> _fitImportedImageToCanvas(ui.Image source, Size canvasSize) async {
@@ -512,6 +582,38 @@ class DrawingProvider extends ChangeNotifier {
       return path;
     }
     return '$path.png';
+  }
+
+  String _normalizeExportPathForFormat(
+    String path, {
+    required bool exportJpeg,
+  }) {
+    final String extension = exportJpeg ? '.jpg' : '.png';
+    final String lower = path.toLowerCase();
+    if (lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg')) {
+      return _replacePathExtension(path, extension);
+    }
+    return '$path$extension';
+  }
+
+  String _replacePathExtension(String path, String extension) {
+    final int lastSlash = math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+    final int lastDot = path.lastIndexOf('.');
+    if (lastDot <= lastSlash) {
+      return '$path$extension';
+    }
+    return '${path.substring(0, lastDot)}$extension';
+  }
+
+  String _buildTimestampedExportFileName({required bool exportJpeg}) {
+    final now = DateTime.now();
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    final String timestamp =
+        '${now.year}${twoDigits(now.month)}${twoDigits(now.day)}_${twoDigits(now.hour)}${twoDigits(now.minute)}${twoDigits(now.second)}';
+    final String extension = exportJpeg ? 'jpg' : 'png';
+    return '$timestamp.$extension';
   }
 
   void clear() {
@@ -1122,6 +1224,160 @@ class DrawingProvider extends ChangeNotifier {
     _selectionMergeToActiveLayer = true;
     _tool = ToolType.lasso;
     notifyListeners();
+  }
+
+  Future<void> addTextToActiveLayer({
+    required String text,
+    String? fontFamily,
+    double fontSize = 32,
+    bool vertical = false,
+  }) async {
+    if (text.trim().isEmpty) return;
+
+    if (_selection != null && _canvasSize != Size.zero) {
+      await commitSelection();
+    }
+
+    _saveState();
+    final Size canvasSize = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    final String normalizedText = text.replaceAll('\r\n', '\n');
+    final ui.Image textImage = await _buildTextSelectionImage(
+      text: normalizedText,
+      fontFamily: fontFamily,
+      fontSize: fontSize,
+      vertical: vertical,
+      maxWidth: canvasSize.width,
+    );
+    final Rect baseRect = Rect.fromLTWH(
+      (canvasSize.width - textImage.width.toDouble()) / 2,
+      (canvasSize.height - textImage.height.toDouble()) / 2,
+      textImage.width.toDouble(),
+      textImage.height.toDouble(),
+    );
+    _selection = LassoSelection(
+      image: textImage,
+      maskPath: Path()..addRect(baseRect),
+      layer: _activeLayer,
+      baseRect: baseRect,
+    );
+    _selectionMasksSource = false;
+    _selectionHandlesFilled = true;
+    _selectionMergeToActiveLayer = true;
+    _tool = ToolType.lasso;
+    notifyListeners();
+  }
+
+  Future<ui.Image> _buildTextSelectionImage({
+    required String text,
+    required String? fontFamily,
+    required double fontSize,
+    required bool vertical,
+    required double maxWidth,
+  }) async {
+    return vertical
+        ? _buildVerticalTextImage(
+            text: text,
+            fontFamily: fontFamily,
+            fontSize: fontSize,
+          )
+        : _buildHorizontalTextImage(
+            text: text,
+            fontFamily: fontFamily,
+            fontSize: fontSize,
+            maxWidth: maxWidth,
+          );
+  }
+
+  Future<ui.Image> _buildHorizontalTextImage({
+    required String text,
+    required String? fontFamily,
+    required double fontSize,
+    required double maxWidth,
+  }) async {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: Colors.black,
+          fontSize: fontSize,
+          height: 1.2,
+          fontFamily: fontFamily,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    )..layout(maxWidth: maxWidth);
+    final int width = math.max(1, textPainter.width.ceil());
+    final int height = math.max(1, textPainter.height.ceil());
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+    textPainter.paint(canvas, Offset.zero);
+    final picture = recorder.endRecording();
+    return picture.toImage(width, height);
+  }
+
+  Future<ui.Image> _buildVerticalTextImage({
+    required String text,
+    required String? fontFamily,
+    required double fontSize,
+  }) async {
+    final List<String> lines = text.split('\n');
+    final List<_VerticalTextColumn> columns = <_VerticalTextColumn>[];
+    for (final line in lines) {
+      final String columnText = _toVerticalColumnText(line);
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: columnText,
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: fontSize,
+            height: 1.2,
+            fontFamily: fontFamily,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.start,
+      )..layout();
+      columns.add(
+        _VerticalTextColumn(
+          painter: textPainter,
+          width: math.max(fontSize, textPainter.width),
+          height: math.max(fontSize, textPainter.height),
+        ),
+      );
+    }
+
+    const double columnGap = 8.0;
+    double totalWidth = 0;
+    double totalHeight = 0;
+    for (int i = 0; i < columns.length; i++) {
+      totalWidth += columns[i].width;
+      if (i > 0) {
+        totalWidth += columnGap;
+      }
+      totalHeight = math.max(totalHeight, columns[i].height);
+    }
+
+    final int width = math.max(1, totalWidth.ceil());
+    final int height = math.max(1, totalHeight.ceil());
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+    double rightEdge = totalWidth;
+    for (final column in columns) {
+      final double x = rightEdge - column.width;
+      column.painter.paint(canvas, Offset(x, 0));
+      rightEdge = x - columnGap;
+    }
+
+    final picture = recorder.endRecording();
+    return picture.toImage(width, height);
+  }
+
+  String _toVerticalColumnText(String text) {
+    if (text.isEmpty) return ' ';
+    return text.runes.map((rune) => String.fromCharCode(rune)).join('\n');
   }
 
   Future<ui.Image> _renderLayerWithClearedSelection(

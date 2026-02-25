@@ -4,6 +4,22 @@ import 'package:provider/provider.dart';
 import '../models/drawing.dart';
 import '../providers/drawing_provider.dart';
 
+enum _TextFontOption {
+  gothic,
+  mincho,
+}
+
+enum _TextSizeOption {
+  small,
+  medium,
+  large,
+}
+
+enum _TextDirectionOption {
+  horizontal,
+  vertical,
+}
+
 class ToolSidebar extends StatelessWidget {
   const ToolSidebar({super.key});
 
@@ -98,6 +114,15 @@ class ToolSidebar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _ToolButton(
+                  label: 'あ',
+                  tooltip: 'Text input',
+                  selected: false,
+                  onTap: () {
+                    _showTextInputDialog(context, drawing);
+                  },
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
                   label: '30',
                   tooltip: 'Tone 30%',
                   selected: selected == ToolType.tone30,
@@ -136,6 +161,154 @@ class ToolSidebar extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  Future<void> _showTextInputDialog(
+    BuildContext context,
+    DrawingProvider drawing,
+  ) async {
+    final TextEditingController controller = TextEditingController();
+    _TextFontOption fontOption = _TextFontOption.gothic;
+    _TextSizeOption sizeOption = _TextSizeOption.medium;
+    _TextDirectionOption directionOption = _TextDirectionOption.horizontal;
+
+    final bool? shouldApply = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              title: const Text('テキスト入力'),
+              content: SizedBox(
+                width: 360,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: controller,
+                        autofocus: true,
+                        maxLines: null,
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                          hintText: '文字を入力',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<_TextFontOption>(
+                        initialValue: fontOption,
+                        decoration: const InputDecoration(
+                          labelText: '書体',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: _TextFontOption.gothic,
+                            child: Text('ゴシック'),
+                          ),
+                          DropdownMenuItem(
+                            value: _TextFontOption.mincho,
+                            child: Text('明朝'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setDialogState(() {
+                            fontOption = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<_TextSizeOption>(
+                        initialValue: sizeOption,
+                        decoration: const InputDecoration(
+                          labelText: 'サイズ',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: _TextSizeOption.small,
+                            child: Text('小 (16px)'),
+                          ),
+                          DropdownMenuItem(
+                            value: _TextSizeOption.medium,
+                            child: Text('中 (32px)'),
+                          ),
+                          DropdownMenuItem(
+                            value: _TextSizeOption.large,
+                            child: Text('大 (64px)'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setDialogState(() {
+                            sizeOption = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      const Text('方向'),
+                      const SizedBox(height: 6),
+                      ToggleButtons(
+                        constraints: const BoxConstraints(
+                          minWidth: 120,
+                          minHeight: 38,
+                        ),
+                        isSelected: [
+                          directionOption == _TextDirectionOption.horizontal,
+                          directionOption == _TextDirectionOption.vertical,
+                        ],
+                        onPressed: (index) {
+                          setDialogState(() {
+                            directionOption = index == 0
+                                ? _TextDirectionOption.horizontal
+                                : _TextDirectionOption.vertical;
+                          });
+                        },
+                        children: const [
+                          Text('横書き'),
+                          Text('縦書き'),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('キャンセル'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('挿入'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    final String rawText = controller.text;
+    controller.dispose();
+    if (shouldApply != true || rawText.trim().isEmpty) return;
+
+    final double fontSize = switch (sizeOption) {
+      _TextSizeOption.small => 16,
+      _TextSizeOption.medium => 32,
+      _TextSizeOption.large => 64,
+    };
+
+    await drawing.addTextToActiveLayer(
+      text: rawText,
+      fontFamily: fontOption == _TextFontOption.mincho ? 'serif' : null,
+      fontSize: fontSize,
+      vertical: directionOption == _TextDirectionOption.vertical,
     );
   }
 }
