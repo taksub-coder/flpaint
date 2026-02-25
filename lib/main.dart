@@ -1,4 +1,4 @@
-// flpaint_プロトタイプF1.4_画角修正版
+// flpaint_プロトタイプ1.5_文字入力第一調整版
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -29,7 +29,7 @@ void main() async {
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
-      title: 'FLPaint - プロトタイプF1.4_画角修正版',
+      title: 'flpaint_プロトタイプ1.5_文字入力第一調整版',
       // 必要に応じて windowButtonVisibility: false, などを追加可能
     );
 
@@ -57,7 +57,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'FLPaint-プロトタイプF1.4',
+      title: 'flpaint_プロトタイプ1.5',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,

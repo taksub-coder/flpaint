@@ -1,4 +1,4 @@
-//flpaint_プロトタイプ1.2d_筆圧第一次完成版
+//flpaint_プロトタイプ1.5_文字入力第一調整版
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -138,6 +138,7 @@ class DrawingProvider extends ChangeNotifier {
   static const double _lassoSelectionSuperSample = 2.0;
   static const int _toneTileSize = 2;
   static const int _toneSuperSampleScale = 8;
+  static const double _verticalPunctuationNudgePoints = 3.0;
   static const Set<String> _verticalSpecialGlyphs = <String>{
     'っ',
     'ゃ',
@@ -1374,7 +1375,7 @@ class DrawingProvider extends ChangeNotifier {
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: Text(
           text,
-          textAlign: TextAlign.center,
+          textAlign: TextAlign.start,
           softWrap: true,
           style: TextStyle(
             color: Colors.black,
@@ -1401,7 +1402,7 @@ class DrawingProvider extends ChangeNotifier {
         ),
       ),
       textDirection: TextDirection.ltr,
-      textAlign: TextAlign.center,
+      textAlign: TextAlign.start,
     )..layout(maxWidth: maxWidth);
     final int width = math.max(1, textPainter.width.ceil());
     final int height = math.max(1, textPainter.height.ceil());
@@ -1493,13 +1494,20 @@ class DrawingProvider extends ChangeNotifier {
 
     double totalWidth = 0;
     double totalHeight = 0;
+    double globalTopPadding = 0;
+    double maxContentHeight = 0;
     for (int i = 0; i < columns.length; i++) {
       totalWidth += columns[i].width;
       if (i > 0) {
         totalWidth += columnGap;
       }
-      totalHeight = math.max(totalHeight, columns[i].height);
+      globalTopPadding = math.max(globalTopPadding, columns[i].topPadding);
+      maxContentHeight = math.max(
+        maxContentHeight,
+        columns[i].height - columns[i].topPadding,
+      );
     }
+    totalHeight = globalTopPadding + maxContentHeight;
 
     final int width = math.max(1, totalWidth.ceil());
     final int height = math.max(1, totalHeight.ceil());
@@ -1509,7 +1517,7 @@ class DrawingProvider extends ChangeNotifier {
     double rightEdge = totalWidth;
     for (final column in columns) {
       final double x = rightEdge - column.width;
-      double y = (totalHeight - column.height) / 2 + column.topPadding;
+      double y = globalTopPadding;
       final double columnCenterX = x + column.width / 2;
       for (int i = 0; i < column.glyphPainters.length; i++) {
         final TextPainter glyphPainter = column.glyphPainters[i];
@@ -1558,14 +1566,19 @@ class DrawingProvider extends ChangeNotifier {
     double upOffset = fontSize * 0.10;
 
     if (glyph == '。' || glyph == '．') {
-      rightOffset = fontSize * 0.38;
-      upOffset = fontSize * 0.25;
+      rightOffset = fontSize * 0.42;
+      upOffset = fontSize * 0.29;
     } else if (glyph == '、' || glyph == '，') {
-      rightOffset = fontSize * 0.20;
-      upOffset = fontSize * 0.12;
+      rightOffset = fontSize * 0.24;
+      upOffset = fontSize * 0.16;
     } else if (glyph == '！' || glyph == '？') {
-      rightOffset = fontSize * 0.32;
-      upOffset = fontSize * 0.18;
+      rightOffset = fontSize * 0.36;
+      upOffset = fontSize * 0.22;
+    }
+
+    if (glyph == '。' || glyph == '．' || glyph == '、' || glyph == '，') {
+      rightOffset += _verticalPunctuationNudgePoints;
+      upOffset += _verticalPunctuationNudgePoints;
     }
 
     return Offset(rightOffset, -upOffset);

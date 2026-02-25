@@ -230,9 +230,17 @@ class _TextInputDialogState extends State<_TextInputDialog> {
     _controller = TextEditingController();
     _inputFocusNode = FocusNode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _inputFocusNode.requestFocus();
+      _requestInputFocus();
+      // Desktop/IME environments can occasionally miss the first request.
+      Future<void>.delayed(const Duration(milliseconds: 120), () {
+        _requestInputFocus();
+      });
     });
+  }
+
+  void _requestInputFocus() {
+    if (!mounted) return;
+    FocusScope.of(context).requestFocus(_inputFocusNode);
   }
 
   @override
@@ -271,6 +279,7 @@ class _TextInputDialogState extends State<_TextInputDialog> {
                 maxLines: null,
                 keyboardType: TextInputType.multiline,
                 textInputAction: TextInputAction.newline,
+                onTap: _requestInputFocus,
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
                   hintText: '文字を入力',
@@ -299,7 +308,7 @@ class _TextInputDialogState extends State<_TextInputDialog> {
                   setState(() {
                     _fontOption = value;
                   });
-                  _inputFocusNode.requestFocus();
+                  _requestInputFocus();
                 },
               ),
               const SizedBox(height: 12),
@@ -329,7 +338,7 @@ class _TextInputDialogState extends State<_TextInputDialog> {
                   setState(() {
                     _sizeOption = value;
                   });
-                  _inputFocusNode.requestFocus();
+                  _requestInputFocus();
                 },
               ),
               const SizedBox(height: 12),
@@ -350,7 +359,7 @@ class _TextInputDialogState extends State<_TextInputDialog> {
                         ? _TextDirectionOption.horizontal
                         : _TextDirectionOption.vertical;
                   });
-                  _inputFocusNode.requestFocus();
+                  _requestInputFocus();
                 },
                 children: const [
                   Text('横書き'),
