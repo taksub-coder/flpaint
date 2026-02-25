@@ -16,6 +16,7 @@ dependencies:
   file_selector: ^1.0.3
   flutter_file_dialog: ^3.0.2
   image: ^4.2.0
+  tategaki: ^0.6.4
 
 dev_dependencies:
   flutter_test:

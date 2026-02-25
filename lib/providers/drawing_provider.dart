@@ -1,4 +1,4 @@
-﻿//flpaint_プロトタイプ1.2d_筆圧第一次完成版
+//flpaint_プロトタイプ1.2d_筆圧第一次完成版
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:image/image.dart' as img;
@@ -33,15 +34,28 @@ class _DrawingSnapshot {
 }
 
 class _VerticalTextColumn {
-  final TextPainter painter;
+  final List<TextPainter> glyphPainters;
+  final List<double> glyphWidths;
+  final List<_VerticalGlyphKind> glyphKinds;
+  final List<Offset> glyphOffsets;
   final double width;
   final double height;
+  final double topPadding;
 
   _VerticalTextColumn({
-    required this.painter,
+    required this.glyphPainters,
+    required this.glyphWidths,
+    required this.glyphKinds,
+    required this.glyphOffsets,
     required this.width,
     required this.height,
+    required this.topPadding,
   });
+}
+
+enum _VerticalGlyphKind {
+  normal,
+  special,
 }
 
 class DrawingProvider extends ChangeNotifier {
@@ -124,15 +138,60 @@ class DrawingProvider extends ChangeNotifier {
   static const double _lassoSelectionSuperSample = 2.0;
   static const int _toneTileSize = 2;
   static const int _toneSuperSampleScale = 8;
+  static const Set<String> _verticalSpecialGlyphs = <String>{
+    'っ',
+    'ゃ',
+    'ゅ',
+    'ょ',
+    'ぁ',
+    'ぃ',
+    'ぅ',
+    'ぇ',
+    'ぉ',
+    'ゎ',
+    'ッ',
+    'ャ',
+    'ュ',
+    'ョ',
+    'ァ',
+    'ィ',
+    'ゥ',
+    'ェ',
+    'ォ',
+    'ヮ',
+    'ヵ',
+    'ヶ',
+    '、',
+    '。',
+    '，',
+    '．',
+    '・',
+    '“',
+    '”',
+    '！',
+    '？',
+  };
   static final Float64List _toneShaderMatrixRotated = (() {
     final c = math.cos(math.pi / 4);
     final s = math.sin(math.pi / 4);
     return Float64List.fromList(
       <double>[
-        c, s, 0, 0,
-        -s, c, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
+        c,
+        s,
+        0,
+        0,
+        -s,
+        c,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
       ],
     );
   })();
@@ -463,7 +522,8 @@ class DrawingProvider extends ChangeNotifier {
     );
   }
 
-  Future<ui.Image> _fitImportedImageToCanvas(ui.Image source, Size canvasSize) async {
+  Future<ui.Image> _fitImportedImageToCanvas(
+      ui.Image source, Size canvasSize) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
@@ -599,7 +659,8 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   String _replacePathExtension(String path, String extension) {
-    final int lastSlash = math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+    final int lastSlash =
+        math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
     final int lastDot = path.lastIndexOf('.');
     if (lastDot <= lastSlash) {
       return '$path$extension';
@@ -707,29 +768,30 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   void _applyPressureTailTaper(DrawnLine line) {
-  final pts = line.points;
-  if (pts.length < 3) return;
+    final pts = line.points;
+    if (pts.length < 3) return;
 
-  final cumulative = <double>[0];
-  for (int i = 1; i < pts.length; i++) {
-    cumulative.add(cumulative.last + (pts[i].offset - pts[i - 1].offset).distance);
+    final cumulative = <double>[0];
+    for (int i = 1; i < pts.length; i++) {
+      cumulative
+          .add(cumulative.last + (pts[i].offset - pts[i - 1].offset).distance);
+    }
+
+    final totalLen = cumulative.last;
+    final taperOutLen = _pressureTaperOutBase; // 14.0を使用
+    final taperStart = math.max(0.0, totalLen - taperOutLen);
+
+    for (int i = 0; i < pts.length; i++) {
+      final d = cumulative[i];
+      if (d <= taperStart) continue;
+
+      final t = ((totalLen - d) / taperOutLen).clamp(0.0, 1.0);
+      final eased = math.pow(t, 1.2).toDouble(); // 滑らかなカーブ
+
+      final w = math.max(1.0, pts[i].width * eased);
+      pts[i] = Point(pts[i].offset, w);
+    }
   }
-
-  final totalLen = cumulative.last;
-  final taperOutLen = _pressureTaperOutBase; // 14.0を使用
-  final taperStart = math.max(0.0, totalLen - taperOutLen);
-
-  for (int i = 0; i < pts.length; i++) {
-    final d = cumulative[i];
-    if (d <= taperStart) continue;
-
-    final t = ((totalLen - d) / taperOutLen).clamp(0.0, 1.0);
-    final eased = math.pow(t, 1.2).toDouble(); // 滑らかなカーブ
-
-    final w = math.max(1.0, pts[i].width * eased); 
-    pts[i] = Point(pts[i].offset, w);
-  }
-}
 
   double _normalizedSpeed() {
     final speedNorm = (_lastSpeed * 1000) / 1200.0; // reference 1200 px/s
@@ -879,51 +941,51 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   void addPoint(Offset point, Offset lastPoint) {
-  if (_isShapeTool(_tool)) {
-    _shapeEnd = point;
-    notifyListeners();
-    return;
-  }
-
-  if (_currentLine == null || _lineStartPoint == null) return;
-
-  final currentPoints = _currentLine!.points;
-  final lastStored = currentPoints.last;
-  final distanceToLast = (point - lastStored.offset).distance;
-
-  // ボコボコ防止（0.5px以下の微細な動きを無視）
-  if (distanceToLast < 0.5) return; 
-
-  final smoothedOffset = _smoothOffset(point);
-
-  // 速度計算
-  final now = DateTime.now();
-  if (_lastPointTime != null) {
-    final dtMs = now.difference(_lastPointTime!).inMicroseconds / 1000.0;
-    if (dtMs > 0) _lastSpeed = distanceToLast / dtMs;
-  }
-  _lastPointTime = now;
-
-  double width = _currentLine!.width;
-  if (_currentLine!.variableWidth) {
-    final speedFactor = (1.0 - 0.1 * _normalizedSpeed()).clamp(0.8, 1.0);
-    final baseWidth = _currentLine!.width * speedFactor;
-
-    final distanceFromStart = (smoothedOffset - _lineStartPoint!).distance;
-
-    // 入りの処理（7.0pxかけて1pxから太くする）
-    if (distanceFromStart <= _pressureTaperInBase) {
-      final t = (distanceFromStart / _pressureTaperInBase).clamp(0.0, 1.0);
-      final eased = math.pow(t, 1.5).toDouble(); 
-      width = math.max(1.0, baseWidth * eased);
-    } else {
-      width = baseWidth;
+    if (_isShapeTool(_tool)) {
+      _shapeEnd = point;
+      notifyListeners();
+      return;
     }
-  }
 
-  currentPoints.add(Point(smoothedOffset, width));
-  notifyListeners();
-}
+    if (_currentLine == null || _lineStartPoint == null) return;
+
+    final currentPoints = _currentLine!.points;
+    final lastStored = currentPoints.last;
+    final distanceToLast = (point - lastStored.offset).distance;
+
+    // ボコボコ防止（0.5px以下の微細な動きを無視）
+    if (distanceToLast < 0.5) return;
+
+    final smoothedOffset = _smoothOffset(point);
+
+    // 速度計算
+    final now = DateTime.now();
+    if (_lastPointTime != null) {
+      final dtMs = now.difference(_lastPointTime!).inMicroseconds / 1000.0;
+      if (dtMs > 0) _lastSpeed = distanceToLast / dtMs;
+    }
+    _lastPointTime = now;
+
+    double width = _currentLine!.width;
+    if (_currentLine!.variableWidth) {
+      final speedFactor = (1.0 - 0.1 * _normalizedSpeed()).clamp(0.8, 1.0);
+      final baseWidth = _currentLine!.width * speedFactor;
+
+      final distanceFromStart = (smoothedOffset - _lineStartPoint!).distance;
+
+      // 入りの処理（7.0pxかけて1pxから太くする）
+      if (distanceFromStart <= _pressureTaperInBase) {
+        final t = (distanceFromStart / _pressureTaperInBase).clamp(0.0, 1.0);
+        final eased = math.pow(t, 1.5).toDouble();
+        width = math.max(1.0, baseWidth * eased);
+      } else {
+        width = baseWidth;
+      }
+    }
+
+    currentPoints.add(Point(smoothedOffset, width));
+    notifyListeners();
+  }
 
   void endLine() {
     if (_isShapeTool(_tool)) {
@@ -1003,7 +1065,12 @@ class DrawingProvider extends ChangeNotifier {
       case ToolType.dot30:
       case ToolType.dot60:
       case ToolType.dot80:
-        _addDotPattern(rect, density: _tool == ToolType.dot30 ? 0.3 : _tool == ToolType.dot60 ? 0.6 : 0.8);
+        _addDotPattern(rect,
+            density: _tool == ToolType.dot30
+                ? 0.3
+                : _tool == ToolType.dot60
+                    ? 0.6
+                    : 0.8);
         break;
       default:
         break;
@@ -1206,7 +1273,8 @@ class DrawingProvider extends ChangeNotifier {
     if (_clipboardImage == null) return;
     _saveState();
     final ui.Image image = _clipboardImage!;
-    final Size canvasSize = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    final Size canvasSize =
+        _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
     final Rect baseRect = Rect.fromLTWH(
       (canvasSize.width - image.width.toDouble()) / 2,
       (canvasSize.height - image.height.toDouble()) / 2,
@@ -1228,6 +1296,7 @@ class DrawingProvider extends ChangeNotifier {
 
   Future<void> addTextToActiveLayer({
     required String text,
+    BuildContext? context,
     String? fontFamily,
     double fontSize = 32,
     bool vertical = false,
@@ -1237,12 +1306,15 @@ class DrawingProvider extends ChangeNotifier {
     if (_selection != null && _canvasSize != Size.zero) {
       await commitSelection();
     }
+    if (context != null && !context.mounted) return;
 
     _saveState();
-    final Size canvasSize = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    final Size canvasSize =
+        _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
     final String normalizedText = text.replaceAll('\r\n', '\n');
     final ui.Image textImage = await _buildTextSelectionImage(
       text: normalizedText,
+      context: context,
       fontFamily: fontFamily,
       fontSize: fontSize,
       vertical: vertical,
@@ -1269,6 +1341,7 @@ class DrawingProvider extends ChangeNotifier {
 
   Future<ui.Image> _buildTextSelectionImage({
     required String text,
+    required BuildContext? context,
     required String? fontFamily,
     required double fontSize,
     required bool vertical,
@@ -1282,6 +1355,7 @@ class DrawingProvider extends ChangeNotifier {
           )
         : _buildHorizontalTextImage(
             text: text,
+            context: context,
             fontFamily: fontFamily,
             fontSize: fontSize,
             maxWidth: maxWidth,
@@ -1290,10 +1364,32 @@ class DrawingProvider extends ChangeNotifier {
 
   Future<ui.Image> _buildHorizontalTextImage({
     required String text,
+    required BuildContext? context,
     required String? fontFamily,
     required double fontSize,
     required double maxWidth,
   }) async {
+    if (context != null) {
+      final Widget horizontalText = ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          softWrap: true,
+          style: TextStyle(
+            color: Colors.black,
+            fontSize: fontSize,
+            height: 1.2,
+            fontFamily: fontFamily,
+          ),
+        ),
+      );
+      return _widgetToImage(
+        horizontalText,
+        context: context,
+      );
+    }
+
     final textPainter = TextPainter(
       text: TextSpan(
         text: text,
@@ -1324,31 +1420,77 @@ class DrawingProvider extends ChangeNotifier {
   }) async {
     final List<String> lines = text.split('\n');
     final List<_VerticalTextColumn> columns = <_VerticalTextColumn>[];
+    // Match previous VerticalTextStyle spacing (characterSpacing: 0.10, lineSpacing: 1.05).
+    const double characterSpacing = 0.10;
+    const double lineSpacing = 1.05;
+    final double glyphAdvance = fontSize + characterSpacing;
+    const double columnGap = lineSpacing;
+
     for (final line in lines) {
-      final String columnText = _toVerticalColumnText(line);
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: columnText,
-          style: TextStyle(
-            color: Colors.black,
-            fontSize: fontSize,
-            height: 1.2,
-            fontFamily: fontFamily,
+      final List<int> runes = line.isEmpty ? <int>[0x20] : line.runes.toList();
+      final List<TextPainter> glyphPainters = <TextPainter>[];
+      final List<double> glyphWidths = <double>[];
+      final List<_VerticalGlyphKind> glyphKinds = <_VerticalGlyphKind>[];
+      final List<Offset> glyphOffsets = <Offset>[];
+      double maxGlyphWidth = 0;
+      double maxGlyphHeight = 0;
+      double maxRightOffset = 0;
+      double maxTopOffset = 0;
+
+      for (final rune in runes) {
+        final String sourceGlyph = String.fromCharCode(rune);
+        final _VerticalGlyphKind glyphKind =
+            _classifyVerticalGlyph(sourceGlyph);
+        final Offset glyphOffset = _verticalGlyphOffset(
+          sourceGlyph,
+          fontSize,
+          glyphKind,
+        );
+        final String glyph = _normalizeVerticalGlyph(sourceGlyph);
+        final TextPainter glyphPainter = TextPainter(
+          text: TextSpan(
+            text: glyph,
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: fontSize,
+              height: 1.0,
+              fontFamily: fontFamily,
+            ),
           ),
-        ),
-        textDirection: TextDirection.ltr,
-        textAlign: TextAlign.start,
-      )..layout();
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.center,
+        )..layout();
+        glyphPainters.add(glyphPainter);
+        glyphWidths.add(glyphPainter.width);
+        glyphKinds.add(glyphKind);
+        glyphOffsets.add(glyphOffset);
+        maxGlyphWidth = math.max(maxGlyphWidth, glyphPainter.width);
+        maxGlyphHeight = math.max(maxGlyphHeight, glyphPainter.height);
+        maxRightOffset = math.max(maxRightOffset, glyphOffset.dx);
+        maxTopOffset = math.max(maxTopOffset, -glyphOffset.dy);
+      }
+
+      final double columnWidth =
+          math.max(fontSize, maxGlyphWidth + maxRightOffset);
+      final double columnHeight = math.max(
+        fontSize,
+        (glyphPainters.length - 1) * glyphAdvance +
+            maxGlyphHeight +
+            maxTopOffset,
+      );
       columns.add(
         _VerticalTextColumn(
-          painter: textPainter,
-          width: math.max(fontSize, textPainter.width),
-          height: math.max(fontSize, textPainter.height),
+          glyphPainters: glyphPainters,
+          glyphWidths: glyphWidths,
+          glyphKinds: glyphKinds,
+          glyphOffsets: glyphOffsets,
+          width: columnWidth,
+          height: columnHeight,
+          topPadding: maxTopOffset,
         ),
       );
     }
 
-    const double columnGap = 8.0;
     double totalWidth = 0;
     double totalHeight = 0;
     for (int i = 0; i < columns.length; i++) {
@@ -1367,17 +1509,73 @@ class DrawingProvider extends ChangeNotifier {
     double rightEdge = totalWidth;
     for (final column in columns) {
       final double x = rightEdge - column.width;
-      column.painter.paint(canvas, Offset(x, 0));
+      double y = (totalHeight - column.height) / 2 + column.topPadding;
+      final double columnCenterX = x + column.width / 2;
+      for (int i = 0; i < column.glyphPainters.length; i++) {
+        final TextPainter glyphPainter = column.glyphPainters[i];
+        final double glyphWidth = column.glyphWidths[i];
+        final Offset glyphOffset = column.glyphOffsets[i];
+        final double cellTop = y;
+        double glyphX = columnCenterX - glyphWidth / 2;
+        double glyphY = cellTop + (glyphAdvance - glyphPainter.height) / 2;
+        glyphX += glyphOffset.dx;
+        glyphY += glyphOffset.dy;
+        canvas.save();
+        glyphPainter.paint(canvas, Offset(glyphX, glyphY));
+        canvas.restore();
+        y += glyphAdvance;
+      }
       rightEdge = x - columnGap;
+    }
+
+    for (final column in columns) {
+      for (final glyphPainter in column.glyphPainters) {
+        glyphPainter.dispose();
+      }
     }
 
     final picture = recorder.endRecording();
     return picture.toImage(width, height);
   }
 
-  String _toVerticalColumnText(String text) {
-    if (text.isEmpty) return ' ';
-    return text.runes.map((rune) => String.fromCharCode(rune)).join('\n');
+  _VerticalGlyphKind _classifyVerticalGlyph(String glyph) {
+    if (_verticalSpecialGlyphs.contains(glyph)) {
+      return _VerticalGlyphKind.special;
+    }
+    return _VerticalGlyphKind.normal;
+  }
+
+  Offset _verticalGlyphOffset(
+    String glyph,
+    double fontSize,
+    _VerticalGlyphKind glyphKind,
+  ) {
+    if (glyphKind != _VerticalGlyphKind.special) {
+      return Offset.zero;
+    }
+
+    double rightOffset = fontSize * 0.25;
+    double upOffset = fontSize * 0.10;
+
+    if (glyph == '。' || glyph == '．') {
+      rightOffset = fontSize * 0.38;
+      upOffset = fontSize * 0.25;
+    } else if (glyph == '、' || glyph == '，') {
+      rightOffset = fontSize * 0.20;
+      upOffset = fontSize * 0.12;
+    } else if (glyph == '！' || glyph == '？') {
+      rightOffset = fontSize * 0.32;
+      upOffset = fontSize * 0.18;
+    }
+
+    return Offset(rightOffset, -upOffset);
+  }
+
+  String _normalizeVerticalGlyph(String glyph) {
+    if (glyph == 'ー' || glyph == 'ｰ') {
+      return '｜';
+    }
+    return glyph;
   }
 
   Future<ui.Image> _renderLayerWithClearedSelection(
@@ -1430,7 +1628,8 @@ class DrawingProvider extends ChangeNotifier {
       // Find the corner with the minimum y, breaking ties with minimum x.
       if (corner.dy < visualTopLeft.dy) {
         visualTopLeft = corner;
-      } else if ((corner.dy - visualTopLeft.dy).abs() < 0.1 && corner.dx < visualTopLeft.dx) {
+      } else if ((corner.dy - visualTopLeft.dy).abs() < 0.1 &&
+          corner.dx < visualTopLeft.dx) {
         visualTopLeft = corner;
       }
     }
@@ -1456,7 +1655,8 @@ class DrawingProvider extends ChangeNotifier {
     if (_selection == null) return SelectionHandle.none;
     final handles = _handlePositions(_selection!);
     if (handles.containsKey(SelectionHandle.mirror) &&
-        (handles[SelectionHandle.mirror]! - position).distance <= mirrorRadius) {
+        (handles[SelectionHandle.mirror]! - position).distance <=
+            mirrorRadius) {
       return SelectionHandle.mirror;
     }
     for (final entry in handles.entries) {
@@ -1481,7 +1681,8 @@ class DrawingProvider extends ChangeNotifier {
     final double dy = position.dy < bounds.top
         ? bounds.top - position.dy
         : position.dy - bounds.bottom;
-    final double distance = math.sqrt(math.pow(math.max(dx, 0), 2) + math.pow(math.max(dy, 0), 2));
+    final double distance =
+        math.sqrt(math.pow(math.max(dx, 0), 2) + math.pow(math.max(dy, 0), 2));
     return distance > threshold;
   }
 
@@ -1592,16 +1793,17 @@ class DrawingProvider extends ChangeNotifier {
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
-        ..filterQuality = toneShader == null
-            ? FilterQuality.low
-            : FilterQuality.high;
+        ..filterQuality =
+            toneShader == null ? FilterQuality.low : FilterQuality.high;
 
       switch (line.tool) {
         case ToolType.rect:
         case ToolType.fillRect:
           if (line.shapeRect == null) continue;
           paint
-            ..style = line.tool == ToolType.fillRect ? PaintingStyle.fill : PaintingStyle.stroke
+            ..style = line.tool == ToolType.fillRect
+                ? PaintingStyle.fill
+                : PaintingStyle.stroke
             ..strokeCap = StrokeCap.butt
             ..strokeJoin = StrokeJoin.miter
             ..strokeWidth = line.width;
@@ -1611,7 +1813,9 @@ class DrawingProvider extends ChangeNotifier {
         case ToolType.fillCircle:
           if (line.shapeRect == null) continue;
           paint
-            ..style = line.tool == ToolType.fillCircle ? PaintingStyle.fill : PaintingStyle.stroke
+            ..style = line.tool == ToolType.fillCircle
+                ? PaintingStyle.fill
+                : PaintingStyle.stroke
             ..strokeWidth = line.width;
           canvas.drawOval(line.shapeRect!, paint);
           break;
@@ -1662,7 +1866,8 @@ class DrawingProvider extends ChangeNotifier {
     final path = Path();
     if (points.isEmpty) return path;
     if (points.length == 1) {
-      path.addOval(Rect.fromCircle(center: points.first.offset, radius: points.first.width / 2));
+      path.addOval(Rect.fromCircle(
+          center: points.first.offset, radius: points.first.width / 2));
       return path;
     }
     final filtered = _lowPassFilter(points, factor: 0.6);
@@ -1734,13 +1939,29 @@ class DrawingProvider extends ChangeNotifier {
         final dx = 0.5 *
             ((2 * p1.offset.dx) +
                 (-p0.offset.dx + p2.offset.dx) * t +
-                (2 * p0.offset.dx - 5 * p1.offset.dx + 4 * p2.offset.dx - p3.offset.dx) * t2 +
-                (-p0.offset.dx + 3 * p1.offset.dx - 3 * p2.offset.dx + p3.offset.dx) * t3);
+                (2 * p0.offset.dx -
+                        5 * p1.offset.dx +
+                        4 * p2.offset.dx -
+                        p3.offset.dx) *
+                    t2 +
+                (-p0.offset.dx +
+                        3 * p1.offset.dx -
+                        3 * p2.offset.dx +
+                        p3.offset.dx) *
+                    t3);
         final dy = 0.5 *
             ((2 * p1.offset.dy) +
                 (-p0.offset.dy + p2.offset.dy) * t +
-                (2 * p0.offset.dy - 5 * p1.offset.dy + 4 * p2.offset.dy - p3.offset.dy) * t2 +
-                (-p0.offset.dy + 3 * p1.offset.dy - 3 * p2.offset.dy + p3.offset.dy) * t3);
+                (2 * p0.offset.dy -
+                        5 * p1.offset.dy +
+                        4 * p2.offset.dy -
+                        p3.offset.dy) *
+                    t2 +
+                (-p0.offset.dy +
+                        3 * p1.offset.dy -
+                        3 * p2.offset.dy +
+                        p3.offset.dy) *
+                    t3);
         final width = ui.lerpDouble(p1.width, p2.width, t)!;
         dense.add(Point(Offset(dx, dy), width));
       }
@@ -1782,10 +2003,63 @@ class DrawingProvider extends ChangeNotifier {
     for (int i = 1; i < points.length; i++) {
       final previous = result.last;
       final current = points[i];
-      final filteredOffset = Offset.lerp(previous.offset, current.offset, factor)!;
+      final filteredOffset =
+          Offset.lerp(previous.offset, current.offset, factor)!;
       result.add(Point(filteredOffset, current.width));
     }
     return result;
   }
+}
 
+Future<ui.Image> _widgetToImage(
+  Widget widget, {
+  required BuildContext context,
+  double pixelRatio = 1.0,
+}) async {
+  final repaintKey = GlobalKey();
+  final overlay = Overlay.maybeOf(context, rootOverlay: true) ??
+      Navigator.of(context, rootNavigator: true).overlay;
+  if (overlay == null) {
+    throw StateError('Overlay is not available for text rendering.');
+  }
+
+  final overlayEntry = OverlayEntry(
+    builder: (_) => IgnorePointer(
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: RepaintBoundary(
+          key: repaintKey,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: Material(
+              type: MaterialType.transparency,
+              child: widget,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  overlay.insert(overlayEntry);
+  try {
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await WidgetsBinding.instance.endOfFrame;
+
+    final BuildContext? renderContext = repaintKey.currentContext;
+    if (renderContext == null) {
+      throw StateError('Failed to capture rendered widget context.');
+    }
+    if (!renderContext.mounted) {
+      throw StateError('Rendered widget context was unmounted.');
+    }
+    final RenderObject? renderObject = renderContext.findRenderObject();
+    if (renderObject is! RenderRepaintBoundary) {
+      throw StateError('Rendered widget is not a RepaintBoundary.');
+    }
+
+    return renderObject.toImage(pixelRatio: pixelRatio);
+  } finally {
+    overlayEntry.remove();
+  }
 }
