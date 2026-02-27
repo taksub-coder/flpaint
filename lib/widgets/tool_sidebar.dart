@@ -240,6 +240,7 @@ class _TextInputDialogState extends State<_TextInputDialog> {
 
   void _requestInputFocus() {
     if (!mounted) return;
+    if (_inputFocusNode.hasFocus) return;
     FocusScope.of(context).requestFocus(_inputFocusNode);
   }
 
@@ -279,6 +280,7 @@ class _TextInputDialogState extends State<_TextInputDialog> {
                 maxLines: null,
                 keyboardType: TextInputType.multiline,
                 textInputAction: TextInputAction.newline,
+                enableInteractiveSelection: true,
                 onTap: _requestInputFocus,
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),

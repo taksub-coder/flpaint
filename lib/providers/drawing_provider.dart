@@ -1,4 +1,4 @@
-//flpaint_プロトタイプ1.5_文字入力第一調整版
+//flpaint_プロトタイプ1.6_文字入力第２調整版
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -35,18 +35,22 @@ class _DrawingSnapshot {
 
 class _VerticalTextColumn {
   final List<TextPainter> glyphPainters;
-  final List<double> glyphWidths;
+  final List<double> glyphRenderWidths;
+  final List<double> glyphRenderHeights;
   final List<_VerticalGlyphKind> glyphKinds;
   final List<Offset> glyphOffsets;
+  final List<double> glyphRotations;
   final double width;
   final double height;
   final double topPadding;
 
   _VerticalTextColumn({
     required this.glyphPainters,
-    required this.glyphWidths,
+    required this.glyphRenderWidths,
+    required this.glyphRenderHeights,
     required this.glyphKinds,
     required this.glyphOffsets,
+    required this.glyphRotations,
     required this.width,
     required this.height,
     required this.topPadding,
@@ -166,6 +170,8 @@ class DrawingProvider extends ChangeNotifier {
     '。',
     '，',
     '．',
+    '〜',
+    '～',
     '・',
     '“',
     '”',
@@ -1430,9 +1436,11 @@ class DrawingProvider extends ChangeNotifier {
     for (final line in lines) {
       final List<int> runes = line.isEmpty ? <int>[0x20] : line.runes.toList();
       final List<TextPainter> glyphPainters = <TextPainter>[];
-      final List<double> glyphWidths = <double>[];
+      final List<double> glyphRenderWidths = <double>[];
+      final List<double> glyphRenderHeights = <double>[];
       final List<_VerticalGlyphKind> glyphKinds = <_VerticalGlyphKind>[];
       final List<Offset> glyphOffsets = <Offset>[];
+      final List<double> glyphRotations = <double>[];
       double maxGlyphWidth = 0;
       double maxGlyphHeight = 0;
       double maxRightOffset = 0;
@@ -1448,6 +1456,7 @@ class DrawingProvider extends ChangeNotifier {
           glyphKind,
         );
         final String glyph = _normalizeVerticalGlyph(sourceGlyph);
+        final double glyphRotation = _verticalGlyphRotation(sourceGlyph);
         final TextPainter glyphPainter = TextPainter(
           text: TextSpan(
             text: glyph,
@@ -1461,12 +1470,19 @@ class DrawingProvider extends ChangeNotifier {
           textDirection: TextDirection.ltr,
           textAlign: TextAlign.center,
         )..layout();
+        final bool quarterTurn = _isQuarterTurn(glyphRotation);
+        final double renderWidth =
+            quarterTurn ? glyphPainter.height : glyphPainter.width;
+        final double renderHeight =
+            quarterTurn ? glyphPainter.width : glyphPainter.height;
         glyphPainters.add(glyphPainter);
-        glyphWidths.add(glyphPainter.width);
+        glyphRenderWidths.add(renderWidth);
+        glyphRenderHeights.add(renderHeight);
         glyphKinds.add(glyphKind);
         glyphOffsets.add(glyphOffset);
-        maxGlyphWidth = math.max(maxGlyphWidth, glyphPainter.width);
-        maxGlyphHeight = math.max(maxGlyphHeight, glyphPainter.height);
+        glyphRotations.add(glyphRotation);
+        maxGlyphWidth = math.max(maxGlyphWidth, renderWidth);
+        maxGlyphHeight = math.max(maxGlyphHeight, renderHeight);
         maxRightOffset = math.max(maxRightOffset, glyphOffset.dx);
         maxTopOffset = math.max(maxTopOffset, -glyphOffset.dy);
       }
@@ -1482,9 +1498,11 @@ class DrawingProvider extends ChangeNotifier {
       columns.add(
         _VerticalTextColumn(
           glyphPainters: glyphPainters,
-          glyphWidths: glyphWidths,
+          glyphRenderWidths: glyphRenderWidths,
+          glyphRenderHeights: glyphRenderHeights,
           glyphKinds: glyphKinds,
           glyphOffsets: glyphOffsets,
+          glyphRotations: glyphRotations,
           width: columnWidth,
           height: columnHeight,
           topPadding: maxTopOffset,
@@ -1521,15 +1539,26 @@ class DrawingProvider extends ChangeNotifier {
       final double columnCenterX = x + column.width / 2;
       for (int i = 0; i < column.glyphPainters.length; i++) {
         final TextPainter glyphPainter = column.glyphPainters[i];
-        final double glyphWidth = column.glyphWidths[i];
+        final double glyphWidth = column.glyphRenderWidths[i];
+        final double glyphHeight = column.glyphRenderHeights[i];
         final Offset glyphOffset = column.glyphOffsets[i];
+        final double glyphRotation = column.glyphRotations[i];
         final double cellTop = y;
         double glyphX = columnCenterX - glyphWidth / 2;
-        double glyphY = cellTop + (glyphAdvance - glyphPainter.height) / 2;
+        double glyphY = cellTop + (glyphAdvance - glyphHeight) / 2;
         glyphX += glyphOffset.dx;
         glyphY += glyphOffset.dy;
         canvas.save();
-        glyphPainter.paint(canvas, Offset(glyphX, glyphY));
+        if (_isQuarterTurn(glyphRotation)) {
+          final Offset cellCenter =
+              Offset(glyphX + glyphWidth / 2, glyphY + glyphHeight / 2);
+          canvas.translate(cellCenter.dx, cellCenter.dy);
+          canvas.rotate(glyphRotation);
+          canvas.translate(-glyphPainter.width / 2, -glyphPainter.height / 2);
+          glyphPainter.paint(canvas, Offset.zero);
+        } else {
+          glyphPainter.paint(canvas, Offset(glyphX, glyphY));
+        }
         canvas.restore();
         y += glyphAdvance;
       }
@@ -1562,15 +1591,18 @@ class DrawingProvider extends ChangeNotifier {
       return Offset.zero;
     }
 
-    double rightOffset = fontSize * 0.25;
-    double upOffset = fontSize * 0.10;
+    double rightOffset = fontSize * 0.20;
+    double upOffset = fontSize * 0.18;
 
     if (glyph == '。' || glyph == '．') {
       rightOffset = fontSize * 0.42;
-      upOffset = fontSize * 0.29;
+      upOffset = fontSize * 0.44;
     } else if (glyph == '、' || glyph == '，') {
-      rightOffset = fontSize * 0.24;
-      upOffset = fontSize * 0.16;
+      rightOffset = fontSize * 0.54;
+      upOffset = fontSize * 0.43;
+    } else if (glyph == '〜' || glyph == '～') {
+      rightOffset = 0.0;
+      upOffset = 0.0;
     } else if (glyph == '！' || glyph == '？') {
       rightOffset = fontSize * 0.36;
       upOffset = fontSize * 0.22;
@@ -1589,6 +1621,17 @@ class DrawingProvider extends ChangeNotifier {
       return '｜';
     }
     return glyph;
+  }
+
+  double _verticalGlyphRotation(String glyph) {
+    if (glyph == '〜' || glyph == '～') {
+      return math.pi / 2;
+    }
+    return 0.0;
+  }
+
+  bool _isQuarterTurn(double radians) {
+    return (radians.abs() - (math.pi / 2)).abs() < 0.0001;
   }
 
   Future<ui.Image> _renderLayerWithClearedSelection(

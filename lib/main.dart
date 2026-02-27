@@ -1,4 +1,4 @@
-// flpaint_プロトタイプ1.5_文字入力第一調整版
+//flpaint_プロトタイプ1.6_文字入力第２調整版
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
