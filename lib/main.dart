@@ -256,28 +256,40 @@ class _MyHomePageState extends State<MyHomePage> {
                         scaleEnabled: !_suspendInteractiveViewerGestures,
                         trackpadScrollCausesScale: true,
                         transformationController: _transformationController,
-                        child: Padding(
-                          padding: const EdgeInsets.all(_canvasViewportPadding), // 広大な余白でズームアウト対応
-                          child: Container(
-                            width: 768,
-                            height: 1024,
-                            decoration: const BoxDecoration(
-                              color: Colors.white,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black54,
-                                  blurRadius: 20,
+                        child: SizedBox(
+                          width: 768 + (_canvasViewportPadding * 2),
+                          height: 1024 + (_canvasViewportPadding * 2),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(_canvasViewportPadding), // 広大な余白でズームアウト対応
+                                child: Container(
+                                  width: 768,
+                                  height: 1024,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.white,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black54,
+                                        blurRadius: 20,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ],
-                            ),
-                            // DrawingCanvas を確実に最前面にする
-                            child: DrawingCanvas(
-                              onTwoFingerPan: _onCanvasTwoFingerPan,
-                              onTwoFingerScale: _onCanvasTwoFingerScale,
-                              toCanvas: _toCanvasPosition,
-                              onSelectionHandleInteractionChanged:
-                                  _onSelectionHandleInteractionChanged,
-                            ),
+                              ),
+                              Positioned.fill(
+                                child: DrawingCanvas(
+                                  onTwoFingerPan: _onCanvasTwoFingerPan,
+                                  onTwoFingerScale: _onCanvasTwoFingerScale,
+                                  toCanvas: _toCanvasPosition,
+                                  onSelectionHandleInteractionChanged:
+                                      _onSelectionHandleInteractionChanged,
+                                  logicalCanvasSize: const Size(768, 1024),
+                                  canvasVisualOffset: const Offset(_canvasViewportPadding, _canvasViewportPadding),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),

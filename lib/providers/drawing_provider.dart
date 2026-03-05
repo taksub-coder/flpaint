@@ -381,16 +381,30 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   Future<void> importImageFromDialog() async {
-    final XFile? file = await openFile(
-      acceptedTypeGroups: const [
-        XTypeGroup(
-          label: 'Image',
-          extensions: ['png', 'jpg', 'jpeg'],
+    Uint8List bytes;
+    if (Platform.isAndroid) {
+      final String? filePath = await FlutterFileDialog.pickFile(
+        params: const OpenFileDialogParams(
+          dialogType: OpenFileDialogType.document,
+          fileExtensionsFilter: ['png', 'jpg', 'jpeg'],
+          mimeTypesFilter: ['image/*'],
+          copyFileToCacheDir: true,
         ),
-      ],
-    );
-    if (file == null) return;
-    final Uint8List bytes = await file.readAsBytes();
+      );
+      if (filePath == null) return;
+      bytes = await File(filePath).readAsBytes();
+    } else {
+      final XFile? file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'Image',
+            extensions: ['png', 'jpg', 'jpeg'],
+          ),
+        ],
+      );
+      if (file == null) return;
+      bytes = await file.readAsBytes();
+    }
     if (bytes.isEmpty) return;
 
     if (_selection != null &&

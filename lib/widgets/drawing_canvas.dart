@@ -11,12 +11,16 @@ class DrawingCanvas extends StatefulWidget {
       onTwoFingerScale;
   final Offset Function(Offset globalPoint)? toCanvas;
   final ValueChanged<bool>? onSelectionHandleInteractionChanged;
+  final Size? logicalCanvasSize;
+  final Offset canvasVisualOffset;
   const DrawingCanvas({
     super.key,
     this.onTwoFingerPan,
     this.onTwoFingerScale,
     this.toCanvas,
     this.onSelectionHandleInteractionChanged,
+    this.logicalCanvasSize,
+    this.canvasVisualOffset = Offset.zero,
   });
   @override
   State<DrawingCanvas> createState() => _DrawingCanvasState();
@@ -48,11 +52,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       builder: (context, drawing, _) {
         return LayoutBuilder(
           builder: (context, constraints) {
-            final Size size = Size(constraints.maxWidth, constraints.maxHeight);
-            if (_canvasSize != size) {
-              _canvasSize = size;
+            final Size widgetSize =
+                Size(constraints.maxWidth, constraints.maxHeight);
+            final Size logicalSize = widget.logicalCanvasSize ?? widgetSize;
+            if (_canvasSize != logicalSize) {
+              _canvasSize = logicalSize;
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                drawing.setCanvasSize(size);
+                drawing.setCanvasSize(logicalSize);
               });
             }
             return Listener(
@@ -97,6 +103,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       currentTool: drawing.currentTool,
                       shapeStart: drawing.shapeStart,
                       shapeEnd: drawing.shapeEnd,
+                      canvasSize: logicalSize,
+                      canvasVisualOffset: widget.canvasVisualOffset,
                     ),
                     child: Container(),
                   ),
@@ -139,6 +147,62 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       return mapper(globalPosition);
     }
     return fallbackLocal ?? globalPosition;
+  }
+
+  bool _isInsideCanvas(Offset position) {
+    final Size size = _canvasSize ?? widget.logicalCanvasSize ?? Size.zero;
+    if (size == Size.zero) return false;
+    return position.dx >= 0 &&
+        position.dy >= 0 &&
+        position.dx <= size.width &&
+        position.dy <= size.height;
+  }
+
+  bool _isShapeTool(ToolType tool) {
+    return tool == ToolType.rect ||
+        tool == ToolType.fillRect ||
+        tool == ToolType.circle ||
+        tool == ToolType.fillCircle ||
+        tool == ToolType.line ||
+        tool == ToolType.dot30 ||
+        tool == ToolType.dot60 ||
+        tool == ToolType.dot80;
+  }
+
+  Offset? _canvasExitIntersection(Offset inside, Offset outside) {
+    final Size size = _canvasSize ?? widget.logicalCanvasSize ?? Size.zero;
+    if (size == Size.zero) return null;
+
+    final double dx = outside.dx - inside.dx;
+    final double dy = outside.dy - inside.dy;
+    if (dx == 0 && dy == 0) return null;
+
+    double t0 = 0.0;
+    double t1 = 1.0;
+
+    bool clipTest(double p, double q) {
+      if (p == 0) return q >= 0;
+      final double r = q / p;
+      if (p < 0) {
+        if (r > t1) return false;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return false;
+        if (r < t1) t1 = r;
+      }
+      return true;
+    }
+
+    if (!clipTest(-dx, inside.dx)) return null;
+    if (!clipTest(dx, size.width - inside.dx)) return null;
+    if (!clipTest(-dy, inside.dy)) return null;
+    if (!clipTest(dy, size.height - inside.dy)) return null;
+
+    final double t = t1;
+    return Offset(
+      inside.dx + dx * t,
+      inside.dy + dy * t,
+    );
   }
 
   void _syncIgnoreDrawingGestures() {
@@ -213,10 +277,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       fallbackLocal: event.localPosition,
     );
     _activeDrawPointer = event.pointer;
-    _lastOffset = pos;
-    _pendingDrawStart = pos;
+    _lastOffset = _isInsideCanvas(pos) ? pos : null;
+    _pendingDrawStart = _isInsideCanvas(pos) ? pos : null;
     _activeDrawStarted = false;
-    if (drawing.currentTool == ToolType.lasso) {
+    if (drawing.currentTool == ToolType.lasso && _isInsideCanvas(pos)) {
       drawing.startLasso(pos);
       _activeDrawStarted = true;
     }
@@ -266,14 +330,42 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         event.position,
         fallbackLocal: event.localPosition,
       );
+      final bool isInsideCanvas = _isInsideCanvas(pos);
       if (drawing.currentTool == ToolType.lasso) {
-        if (drawing.isDrawingLasso) {
+        if (!isInsideCanvas) {
+          _lastOffset = null;
+          return;
+        }
+        if (!drawing.isDrawingLasso) {
+          drawing.startLasso(pos);
+          _activeDrawStarted = true;
+        } else {
           drawing.extendLasso(pos);
         }
       } else {
+        if (!isInsideCanvas) {
+          final Offset? lastInside = _lastOffset;
+          if (lastInside != null) {
+            final Offset? edgePoint = _canvasExitIntersection(lastInside, pos);
+            if (edgePoint != null) {
+              drawing.addPoint(edgePoint, lastInside);
+              _lastOffset = edgePoint;
+            }
+          }
+          if (_activeDrawStarted && !_isShapeTool(drawing.currentTool)) {
+            drawing.endLine();
+            _activeDrawStarted = false;
+          }
+          _pendingDrawStart = null;
+          _lastOffset = null;
+          return;
+        }
         if (!_activeDrawStarted) {
           drawing.startNewLine(_pendingDrawStart ?? pos);
           _activeDrawStarted = true;
+          _lastOffset = pos;
+          _pendingDrawStart = null;
+          return;
         }
         if (_lastOffset != null) {
           drawing.addPoint(pos, _lastOffset!);
@@ -638,6 +730,8 @@ class DrawingPainter extends CustomPainter {
   final ToolType currentTool;
   final Offset? shapeStart;
   final Offset? shapeEnd;
+  final Size canvasSize;
+  final Offset canvasVisualOffset;
 
   DrawingPainter({
     required this.layerALines,
@@ -664,12 +758,17 @@ class DrawingPainter extends CustomPainter {
     required this.currentTool,
     required this.shapeStart,
     required this.shapeEnd,
+    required this.canvasSize,
+    required this.canvasVisualOffset,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     // ★ ここを削除（またはコメントアウト） ★
     // canvas.drawColor(Colors.white, BlendMode.srcOver);
+
+    canvas.save();
+    canvas.translate(canvasVisualOffset.dx, canvasVisualOffset.dy);
 
     final Path? layerAHolePath = selectionMasksSource &&
             selection != null &&
@@ -689,7 +788,7 @@ class DrawingPainter extends CustomPainter {
 
     _drawLayer(
       canvas,
-      size,
+      canvasSize,
       layerABaseImage,
       layerALines,
       isVisible: isLayerAVisible,
@@ -698,7 +797,7 @@ class DrawingPainter extends CustomPainter {
     );
     _drawLayer(
       canvas,
-      size,
+      canvasSize,
       layerBBaseImage,
       layerBLines,
       isVisible: isLayerBVisible,
@@ -707,7 +806,7 @@ class DrawingPainter extends CustomPainter {
     );
     _drawLayer(
       canvas,
-      size,
+      canvasSize,
       layerCBaseImage,
       layerCLines,
       isVisible: isLayerCVisible,
@@ -728,7 +827,7 @@ class DrawingPainter extends CustomPainter {
       };
       if (selectionVisible && selectionOpacity > 0) {
         canvas.saveLayer(
-          Rect.fromLTWH(0, 0, size.width, size.height),
+          Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
           Paint()..color = Colors.white.withValues(alpha: selectionOpacity),
         );
         _paintSelection(canvas, selection!);
@@ -742,6 +841,7 @@ class DrawingPainter extends CustomPainter {
     if (_isShapeTool(currentTool) && shapeStart != null && shapeEnd != null) {
       _drawShapeGuide(canvas, currentTool, shapeStart!, shapeEnd!);
     }
+    canvas.restore();
   }
 
   void _drawLayer(
