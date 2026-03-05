@@ -759,12 +759,13 @@ class DrawingPainter extends CustomPainter {
       Paint()..color = Colors.white.withValues(alpha: opacity),
     );
     if (baseImage != null) {
+      // FilterQuality.low で輪郭を維持し、元画像をグレースケール化せずそのまま表示（矩形描画時も同様）
       canvas.drawImage(
         baseImage,
         Offset.zero,
         Paint()
-          ..isAntiAlias = true
-          ..filterQuality = FilterQuality.high,
+          ..isAntiAlias = false
+          ..filterQuality = FilterQuality.low,
       );
     }
     _drawLines(canvas, lines);
@@ -889,7 +890,7 @@ class DrawingPainter extends CustomPainter {
       rect: rect,
       image: selection.image,
       fit: BoxFit.fill,
-      filterQuality: FilterQuality.high,
+      filterQuality: FilterQuality.low,
     );
     canvas.restore();
   }

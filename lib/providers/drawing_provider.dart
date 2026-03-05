@@ -150,7 +150,8 @@ class DrawingProvider extends ChangeNotifier {
   static const double _pressureTaperInBase = 14.0;
   static const double _pressureTaperOutBase = 14.0;
   static const Size _ioCanvasSize = Size(768, 1024);
-  static const double _lassoSelectionSuperSample = 2.0;
+  /// 1.0 にすることでダウンサンプ時のぼかしを防ぎ、輪郭を維持（元画像をそのまま表示）
+  static const double _lassoSelectionSuperSample = 1.0;
   static const int _toneTileSize = 2;
   static const int _toneSuperSampleScale = 8;
   static const double _verticalPunctuationNudgePoints = 3.0;
@@ -1263,11 +1264,17 @@ class DrawingProvider extends ChangeNotifier {
     canvas.scale(sampleScale, sampleScale);
     canvas.translate(-bounds.left, -bounds.top);
     canvas.clipPath(path);
-    // クリップ内を透明でクリアし、元画像のグレースケール・半透明を維持する（二値化を防ぐ）
+    // クリップ内を透明でクリアし、元画像を維持（二値化を防ぐ）。FilterQuality.low で輪郭をぼやかさない
     canvas.drawColor(Colors.transparent, BlendMode.clear);
     final layerBaseImage = _getLayerBaseImage(layer);
     if (layerBaseImage != null) {
-      canvas.drawImage(layerBaseImage, Offset.zero, Paint());
+      canvas.drawImage(
+        layerBaseImage,
+        Offset.zero,
+        Paint()
+          ..filterQuality = FilterQuality.low
+          ..isAntiAlias = false,
+      );
     }
     _drawLines(canvas, canvasSize, layer: layer);
     final picture = recorder.endRecording();
@@ -1285,8 +1292,8 @@ class DrawingProvider extends ChangeNotifier {
       Rect.fromLTWH(0, 0, sampled.width.toDouble(), sampled.height.toDouble()),
       Rect.fromLTWH(0, 0, bounds.width, bounds.height),
       Paint()
-        ..isAntiAlias = true
-        ..filterQuality = FilterQuality.high,
+        ..isAntiAlias = false
+        ..filterQuality = FilterQuality.low,
     );
     final downsamplePicture = downsampleRecorder.endRecording();
     return downsamplePicture.toImage(bounds.width.ceil(), bounds.height.ceil());
@@ -2091,7 +2098,7 @@ class DrawingProvider extends ChangeNotifier {
       rect: rect,
       image: selection.image,
       fit: BoxFit.fill,
-      filterQuality: FilterQuality.high,
+      filterQuality: FilterQuality.low,
     );
     canvas.restore();
   }
