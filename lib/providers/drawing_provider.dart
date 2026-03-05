@@ -1079,6 +1079,7 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   void clear() {
+    _saveState();
     _lines.clear();
     _currentLine = null;
     _lineStartPoint = null;
@@ -1090,8 +1091,6 @@ class DrawingProvider extends ChangeNotifier {
     _layerCBaseImage = null;
     _shapeStart = null;
     _shapeEnd = null;
-    _undoStack.clear();
-    _redoStack.clear();
     notifyListeners();
   }
 
