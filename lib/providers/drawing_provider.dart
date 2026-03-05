@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/drawing.dart';
 
@@ -59,6 +60,26 @@ class _VerticalTextColumn {
   });
 }
 
+class LayerBackupSet {
+  final String id;
+  final bool isAutosave;
+  final DateTime savedAt;
+  final String displayLabel;
+  final String layerAPath;
+  final String layerBPath;
+  final String layerCPath;
+
+  LayerBackupSet({
+    required this.id,
+    required this.isAutosave,
+    required this.savedAt,
+    required this.displayLabel,
+    required this.layerAPath,
+    required this.layerBPath,
+    required this.layerCPath,
+  });
+}
+
 enum _VerticalGlyphKind {
   normal,
   special,
@@ -105,6 +126,11 @@ class DrawingProvider extends ChangeNotifier {
   // Undo / Redo
   final List<_DrawingSnapshot> _undoStack = [];
   final List<_DrawingSnapshot> _redoStack = [];
+  Directory? _manualBackupDirectory;
+  Directory? _autosaveBackupDirectory;
+  bool _backupDirectoriesReady = false;
+  Timer? _autosaveTimer;
+  bool _backupBusy = false;
 
   List<DrawnLine> get lines => _lines;
   List<DrawnLine> get layerALines => List<DrawnLine>.unmodifiable(
@@ -150,6 +176,13 @@ class DrawingProvider extends ChangeNotifier {
   static const double _pressureTaperInBase = 14.0;
   static const double _pressureTaperOutBase = 14.0;
   static const Size _ioCanvasSize = Size(768, 1024);
+  static const Duration _autosaveInterval = Duration(minutes: 5);
+  static const List<DrawingLayer> _backupLayers = <DrawingLayer>[
+    DrawingLayer.layerA,
+    DrawingLayer.layerB,
+    DrawingLayer.layerC,
+  ];
+
   /// 1.0 にすることでダウンサンプ時のぼかしを防ぎ、輪郭を維持（元画像をそのまま表示）
   static const double _lassoSelectionSuperSample = 1.0;
   static const int _toneTileSize = 2;
@@ -219,11 +252,62 @@ class DrawingProvider extends ChangeNotifier {
 
   DrawingProvider() {
     _initializeToneShaders();
+    unawaited(_initializeBackupSystem());
+  }
+
+  @override
+  void dispose() {
+    _autosaveTimer?.cancel();
+    super.dispose();
   }
 
   void setCanvasSize(Size size) {
     if (_canvasSize == size) return;
     _canvasSize = size;
+  }
+
+  Future<void> _initializeBackupSystem() async {
+    await _ensureBackupDirectories();
+    _startAutosaveTimer();
+  }
+
+  Future<void> _ensureBackupDirectories() async {
+    if (_backupDirectoriesReady &&
+        _manualBackupDirectory != null &&
+        _autosaveBackupDirectory != null) {
+      return;
+    }
+    final Directory appDocDir = await getApplicationDocumentsDirectory();
+    final String rootPath =
+        '${appDocDir.path}${Platform.pathSeparator}FLPaint${Platform.pathSeparator}backup';
+    final Directory manual = Directory(
+      '$rootPath${Platform.pathSeparator}manual',
+    );
+    final Directory autosave = Directory(
+      '$rootPath${Platform.pathSeparator}autosave',
+    );
+    await Future.wait<void>([
+      manual.create(recursive: true),
+      autosave.create(recursive: true),
+    ]);
+    _manualBackupDirectory = manual;
+    _autosaveBackupDirectory = autosave;
+    _backupDirectoriesReady = true;
+  }
+
+  void _startAutosaveTimer() {
+    _autosaveTimer?.cancel();
+    _autosaveTimer = Timer.periodic(_autosaveInterval, (_) {
+      unawaited(_runAutosaveBackupSafely());
+    });
+  }
+
+  Future<void> _runAutosaveBackupSafely() async {
+    try {
+      await saveAutosaveBackup();
+    } catch (_) {
+      // Ignore autosave errors and keep drawing responsive.
+    }
   }
 
   Future<void> _initializeToneShaders() async {
@@ -722,6 +806,276 @@ class DrawingProvider extends ChangeNotifier {
         '${now.year}${twoDigits(now.month)}${twoDigits(now.day)}_${twoDigits(now.hour)}${twoDigits(now.minute)}${twoDigits(now.second)}';
     final String extension = exportJpeg ? 'jpg' : 'png';
     return '$timestamp.$extension';
+  }
+
+  Future<void> createManualBackup() async {
+    await _ensureBackupDirectories();
+    await _withBackupLock(() async {
+      await _performLayerBackupSet(
+        directory: _manualBackupDirectory!,
+        baseName: _formatBackupId(DateTime.now()),
+        useLatestNames: false,
+      );
+    });
+  }
+
+  Future<void> saveAutosaveBackup() async {
+    await _ensureBackupDirectories();
+    await _withBackupLock(() async {
+      await _performLayerBackupSet(
+        directory: _autosaveBackupDirectory!,
+        baseName: 'latest',
+        useLatestNames: true,
+      );
+      await _cleanupAutosaveDirectory();
+    });
+  }
+
+  Future<List<LayerBackupSet>> listAvailableBackups() async {
+    await _ensureBackupDirectories();
+    final List<LayerBackupSet> backups = [];
+
+    final RegExp manualPattern =
+        RegExp(r'^(\d{8}-\d{6})-layer([ABC])\.png$', caseSensitive: false);
+    final Map<String, Map<String, String>> groupedManual = {};
+    await for (final entity in _manualBackupDirectory!.list()) {
+      if (entity is! File) continue;
+      final String fileName = _fileName(entity.path);
+      final Match? match = manualPattern.firstMatch(fileName);
+      if (match == null) continue;
+      final String backupId = match.group(1)!;
+      final String layerKey = match.group(2)!.toUpperCase();
+      groupedManual.putIfAbsent(backupId, () => <String, String>{});
+      groupedManual[backupId]![layerKey] = entity.path;
+    }
+
+    for (final entry in groupedManual.entries) {
+      final paths = entry.value;
+      if (!paths.containsKey('A') ||
+          !paths.containsKey('B') ||
+          !paths.containsKey('C')) {
+        continue;
+      }
+      final DateTime savedAt = _parseBackupId(entry.key) ??
+          await _lastModifiedOfPaths(
+            <String>[paths['A']!, paths['B']!, paths['C']!],
+          );
+      backups.add(
+        LayerBackupSet(
+          id: entry.key,
+          isAutosave: false,
+          savedAt: savedAt,
+          displayLabel: '${_formatBackupDateTime(savedAt)} (manual)',
+          layerAPath: paths['A']!,
+          layerBPath: paths['B']!,
+          layerCPath: paths['C']!,
+        ),
+      );
+    }
+
+    final String autosaveA =
+        '${_autosaveBackupDirectory!.path}${Platform.pathSeparator}latest-layerA.png';
+    final String autosaveB =
+        '${_autosaveBackupDirectory!.path}${Platform.pathSeparator}latest-layerB.png';
+    final String autosaveC =
+        '${_autosaveBackupDirectory!.path}${Platform.pathSeparator}latest-layerC.png';
+    final bool hasAutosave = await Future.wait<bool>(<Future<bool>>[
+      File(autosaveA).exists(),
+      File(autosaveB).exists(),
+      File(autosaveC).exists(),
+    ]).then((List<bool> exists) => exists.every((bool value) => value));
+    if (hasAutosave) {
+      final DateTime savedAt = await _lastModifiedOfPaths(
+        <String>[autosaveA, autosaveB, autosaveC],
+      );
+      backups.add(
+        LayerBackupSet(
+          id: 'latest',
+          isAutosave: true,
+          savedAt: savedAt,
+          displayLabel: '${_formatBackupDateTime(savedAt)} (autosave)',
+          layerAPath: autosaveA,
+          layerBPath: autosaveB,
+          layerCPath: autosaveC,
+        ),
+      );
+    }
+
+    backups.sort((a, b) => b.savedAt.compareTo(a.savedAt));
+    return backups;
+  }
+
+  Future<void> restoreBackup(LayerBackupSet backupSet) async {
+    final List<ui.Image> images =
+        await Future.wait<ui.Image>(<Future<ui.Image>>[
+      _decodePngFile(backupSet.layerAPath),
+      _decodePngFile(backupSet.layerBPath),
+      _decodePngFile(backupSet.layerCPath),
+    ]);
+
+    _saveState();
+    _setLayerBaseImage(DrawingLayer.layerA, images[0]);
+    _setLayerBaseImage(DrawingLayer.layerB, images[1]);
+    _setLayerBaseImage(DrawingLayer.layerC, images[2]);
+    for (final layer in _backupLayers) {
+      _clearLayerLines(layer);
+    }
+    _currentLine = null;
+    _lineStartPoint = null;
+    _lassoPoints.clear();
+    _isDrawingLasso = false;
+    _shapeStart = null;
+    _shapeEnd = null;
+    _resetSelectionState();
+    notifyListeners();
+  }
+
+  Future<void> _withBackupLock(Future<void> Function() action) async {
+    while (_backupBusy) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    _backupBusy = true;
+    try {
+      await action();
+    } finally {
+      _backupBusy = false;
+    }
+  }
+
+  Future<void> _performLayerBackupSet({
+    required Directory directory,
+    required String baseName,
+    required bool useLatestNames,
+  }) async {
+    final Size backupSize =
+        _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    final List<ui.Image> layerImages = await Future.wait<ui.Image>(
+      _backupLayers
+          .map((DrawingLayer layer) => _renderLayerSnapshot(layer, backupSize)),
+    );
+
+    await Future.wait<void>(<Future<void>>[
+      for (int i = 0; i < _backupLayers.length; i++)
+        _writeImageAsPng(
+          layerImages[i],
+          '${directory.path}${Platform.pathSeparator}${_backupFileNameForLayer(baseName, _backupLayers[i], useLatestNames: useLatestNames)}',
+        ),
+    ]);
+  }
+
+  Future<void> _cleanupAutosaveDirectory() async {
+    if (_autosaveBackupDirectory == null) return;
+    final Set<String> keepFileNames = _backupLayers
+        .map(
+          (layer) =>
+              _backupFileNameForLayer('latest', layer, useLatestNames: true),
+        )
+        .toSet();
+    await for (final entity in _autosaveBackupDirectory!.list()) {
+      if (entity is! File) continue;
+      final String fileName = _fileName(entity.path);
+      if (keepFileNames.contains(fileName)) continue;
+      await entity.delete();
+    }
+  }
+
+  Future<ui.Image> _renderLayerSnapshot(DrawingLayer layer, Size size) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+
+    final ui.Image? layerBaseImage = _getLayerBaseImage(layer);
+    if (layerBaseImage != null) {
+      canvas.drawImage(layerBaseImage, Offset.zero, Paint());
+    }
+    _drawLines(canvas, size, layer: layer);
+    if (_selection != null && _selection!.layer == layer) {
+      if (_selectionMasksSource) {
+        _clearSelectionArea(canvas, _selection!);
+      }
+      _paintSelection(canvas, _selection!);
+    }
+
+    final picture = recorder.endRecording();
+    return picture.toImage(size.width.ceil(), size.height.ceil());
+  }
+
+  Future<void> _writeImageAsPng(ui.Image image, String outputPath) async {
+    final ByteData? data =
+        await image.toByteData(format: ui.ImageByteFormat.png);
+    if (data == null) {
+      throw StateError('Failed to encode backup image as PNG.');
+    }
+    await File(outputPath).writeAsBytes(data.buffer.asUint8List(), flush: true);
+  }
+
+  Future<ui.Image> _decodePngFile(String path) async {
+    final Uint8List bytes = await File(path).readAsBytes();
+    if (bytes.isEmpty) {
+      throw StateError('Backup file is empty: $path');
+    }
+    final ui.Codec codec = await ui.instantiateImageCodec(bytes);
+    final ui.FrameInfo frame = await codec.getNextFrame();
+    codec.dispose();
+    return frame.image;
+  }
+
+  String _backupFileNameForLayer(
+    String baseName,
+    DrawingLayer layer, {
+    required bool useLatestNames,
+  }) {
+    final String suffix = switch (layer) {
+      DrawingLayer.layerA => 'A',
+      DrawingLayer.layerB => 'B',
+      DrawingLayer.layerC => 'C',
+    };
+    if (useLatestNames) {
+      return 'latest-layer$suffix.png';
+    }
+    return '$baseName-layer$suffix.png';
+  }
+
+  String _formatBackupId(DateTime now) {
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    return '${now.year}${twoDigits(now.month)}${twoDigits(now.day)}-${twoDigits(now.hour)}${twoDigits(now.minute)}${twoDigits(now.second)}';
+  }
+
+  DateTime? _parseBackupId(String id) {
+    final Match? match =
+        RegExp(r'^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$').firstMatch(id);
+    if (match == null) return null;
+    return DateTime(
+      int.parse(match.group(1)!),
+      int.parse(match.group(2)!),
+      int.parse(match.group(3)!),
+      int.parse(match.group(4)!),
+      int.parse(match.group(5)!),
+      int.parse(match.group(6)!),
+    );
+  }
+
+  String _formatBackupDateTime(DateTime dateTime) {
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    return '${dateTime.year}/${twoDigits(dateTime.month)}/${twoDigits(dateTime.day)} ${twoDigits(dateTime.hour)}:${twoDigits(dateTime.minute)}:${twoDigits(dateTime.second)}';
+  }
+
+  Future<DateTime> _lastModifiedOfPaths(List<String> paths) async {
+    final List<FileStat> stats = await Future.wait<FileStat>(
+        paths.map((String path) => File(path).stat()));
+    DateTime latest = stats.first.modified;
+    for (final stat in stats.skip(1)) {
+      if (stat.modified.isAfter(latest)) {
+        latest = stat.modified;
+      }
+    }
+    return latest;
+  }
+
+  String _fileName(String path) {
+    final String normalized = path.replaceAll('\\', '/');
+    final int slash = normalized.lastIndexOf('/');
+    return slash >= 0 ? normalized.substring(slash + 1) : normalized;
   }
 
   void clear() {

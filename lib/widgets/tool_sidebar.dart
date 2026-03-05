@@ -161,6 +161,26 @@ class ToolSidebar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _ToolButton(
+                  label: 'Bk',
+                  tooltip: 'Backup layers',
+                  selected: false,
+                  onTap: () => _runManualBackup(
+                    context: rootContext,
+                    drawing: drawing,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
+                  label: 'Rst',
+                  tooltip: 'Restore layers',
+                  selected: false,
+                  onTap: () => _showRestoreSelector(
+                    context: rootContext,
+                    drawing: drawing,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
                   label: 'IN',
                   tooltip: 'Import image',
                   selected: false,
@@ -207,6 +227,104 @@ class ToolSidebar extends StatelessWidget {
       fontSize: fontSize,
       vertical: result.directionOption == _TextDirectionOption.vertical,
     );
+  }
+
+  Future<void> _runManualBackup({
+    required BuildContext context,
+    required DrawingProvider drawing,
+  }) async {
+    try {
+      await drawing.createManualBackup();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('バックアップを保存しました。')),
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('バックアップの保存に失敗しました。')),
+      );
+    }
+  }
+
+  Future<void> _showRestoreSelector({
+    required BuildContext context,
+    required DrawingProvider drawing,
+  }) async {
+    try {
+      final List<LayerBackupSet> backups = await drawing.listAvailableBackups();
+      if (!context.mounted) return;
+      if (backups.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('復元できるバックアップがありません。')),
+        );
+        return;
+      }
+
+      final LayerBackupSet? selected = await showDialog<LayerBackupSet>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('保存日時を選択'),
+            content: SizedBox(
+              width: 360,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: backups.length,
+                itemBuilder: (_, index) {
+                  final item = backups[index];
+                  return ListTile(
+                    dense: true,
+                    title: Text(item.displayLabel),
+                    subtitle: Text(item.isAutosave ? 'autosave' : 'manual'),
+                    onTap: () => Navigator.of(dialogContext).pop(item),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('キャンセル'),
+              ),
+            ],
+          );
+        },
+      );
+      if (selected == null || !context.mounted) return;
+
+      final bool? confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('確認'),
+            content: const Text('現在のキャンバスは上書きされます。よろしいですか？'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('キャンセル'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('実行'),
+              ),
+            ],
+          );
+        },
+      );
+      if (confirmed != true) return;
+
+      await drawing.restoreBackup(selected);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('リストアが完了しました。')),
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('リストアに失敗しました。')),
+      );
+    }
   }
 }
 
