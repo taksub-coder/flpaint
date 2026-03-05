@@ -17,6 +17,7 @@ class _DrawingSnapshot {
   final List<DrawnLine> lines;
   final ui.Image? layerABaseImage;
   final ui.Image? layerBBaseImage;
+  final ui.Image? layerCBaseImage;
   final LassoSelection? selection;
   final bool selectionMasksSource;
   final bool selectionHandlesFilled;
@@ -26,6 +27,7 @@ class _DrawingSnapshot {
     required this.lines,
     required this.layerABaseImage,
     required this.layerBBaseImage,
+    required this.layerCBaseImage,
     required this.selection,
     required this.selectionMasksSource,
     required this.selectionHandlesFilled,
@@ -73,12 +75,15 @@ class DrawingProvider extends ChangeNotifier {
   DrawingLayer _activeLayer = DrawingLayer.layerA;
   bool _isLayerAVisible = true;
   bool _isLayerBVisible = true;
+  bool _isLayerCVisible = true;
   double _layerAOpacity = 1.0;
   double _layerBOpacity = 1.0;
+  double _layerCOpacity = 1.0;
   // Eraser passes: alternate between half-transparent and full erase per drag
   bool _nextEraserFullErase = false;
   ui.Image? _layerABaseImage;
   ui.Image? _layerBBaseImage;
+  ui.Image? _layerCBaseImage;
   Size _canvasSize = Size.zero;
   ui.ImageShader? _tone30Shader;
   ui.ImageShader? _tone60Shader;
@@ -108,16 +113,22 @@ class DrawingProvider extends ChangeNotifier {
   List<DrawnLine> get layerBLines => List<DrawnLine>.unmodifiable(
         _lines.where((line) => line.layer == DrawingLayer.layerB),
       );
+  List<DrawnLine> get layerCLines => List<DrawnLine>.unmodifiable(
+        _lines.where((line) => line.layer == DrawingLayer.layerC),
+      );
   double get strokeWidth => _strokeWidth;
   double get eraserWidth => _eraserWidth;
   ToolType get currentTool => _tool;
   DrawingLayer get activeLayer => _activeLayer;
   bool get isLayerAVisible => _isLayerAVisible;
   bool get isLayerBVisible => _isLayerBVisible;
+  bool get isLayerCVisible => _isLayerCVisible;
   double get layerAOpacity => _layerAOpacity;
   double get layerBOpacity => _layerBOpacity;
+  double get layerCOpacity => _layerCOpacity;
   ui.Image? get layerABaseImage => _layerABaseImage;
   ui.Image? get layerBBaseImage => _layerBBaseImage;
+  ui.Image? get layerCBaseImage => _layerCBaseImage;
   ui.ImageShader? get tone30Shader => _tone30Shader;
   ui.ImageShader? get tone60Shader => _tone60Shader;
   ui.ImageShader? get tone80Shader => _tone80Shader;
@@ -345,6 +356,9 @@ class DrawingProvider extends ChangeNotifier {
       case DrawingLayer.layerB:
         _isLayerBVisible = isVisible;
         break;
+      case DrawingLayer.layerC:
+        _isLayerCVisible = isVisible;
+        break;
     }
     notifyListeners();
   }
@@ -357,6 +371,9 @@ class DrawingProvider extends ChangeNotifier {
         break;
       case DrawingLayer.layerB:
         _layerBOpacity = clamped;
+        break;
+      case DrawingLayer.layerC:
+        _layerCOpacity = clamped;
         break;
     }
     notifyListeners();
@@ -587,6 +604,14 @@ class DrawingProvider extends ChangeNotifier {
         _layerBOpacity,
       );
     }
+    if (_isLayerCVisible && _layerCOpacity > 0) {
+      _paintLayerCompositeForExport(
+        canvas,
+        size,
+        DrawingLayer.layerC,
+        _layerCOpacity,
+      );
+    }
 
     final picture = recorder.endRecording();
     return picture.toImage(size.width.ceil(), size.height.ceil());
@@ -693,6 +718,7 @@ class DrawingProvider extends ChangeNotifier {
     _resetSelectionState();
     _layerABaseImage = null;
     _layerBBaseImage = null;
+    _layerCBaseImage = null;
     _shapeStart = null;
     _shapeEnd = null;
     _undoStack.clear();
@@ -701,14 +727,27 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   ui.Image? _getLayerBaseImage(DrawingLayer layer) {
-    return layer == DrawingLayer.layerA ? _layerABaseImage : _layerBBaseImage;
+    switch (layer) {
+      case DrawingLayer.layerA:
+        return _layerABaseImage;
+      case DrawingLayer.layerB:
+        return _layerBBaseImage;
+      case DrawingLayer.layerC:
+        return _layerCBaseImage;
+    }
   }
 
   void _setLayerBaseImage(DrawingLayer layer, ui.Image? image) {
-    if (layer == DrawingLayer.layerA) {
-      _layerABaseImage = image;
-    } else {
-      _layerBBaseImage = image;
+    switch (layer) {
+      case DrawingLayer.layerA:
+        _layerABaseImage = image;
+        break;
+      case DrawingLayer.layerB:
+        _layerBBaseImage = image;
+        break;
+      case DrawingLayer.layerC:
+        _layerCBaseImage = image;
+        break;
     }
   }
 
@@ -839,6 +878,7 @@ class DrawingProvider extends ChangeNotifier {
       lines: List<DrawnLine>.from(_lines.map(_cloneLine)),
       layerABaseImage: _layerABaseImage,
       layerBBaseImage: _layerBBaseImage,
+      layerCBaseImage: _layerCBaseImage,
       selection: _cloneSelection(_selection),
       selectionMasksSource: _selectionMasksSource,
       selectionHandlesFilled: _selectionHandlesFilled,
@@ -852,6 +892,7 @@ class DrawingProvider extends ChangeNotifier {
       ..addAll(snapshot.lines.map(_cloneLine));
     _layerABaseImage = snapshot.layerABaseImage;
     _layerBBaseImage = snapshot.layerBBaseImage;
+    _layerCBaseImage = snapshot.layerCBaseImage;
     _selection = _cloneSelection(snapshot.selection);
     _selectionMasksSource = snapshot.selectionMasksSource;
     _selectionHandlesFilled = snapshot.selectionHandlesFilled;
@@ -1222,6 +1263,8 @@ class DrawingProvider extends ChangeNotifier {
     canvas.scale(sampleScale, sampleScale);
     canvas.translate(-bounds.left, -bounds.top);
     canvas.clipPath(path);
+    // クリップ内を透明でクリアし、元画像のグレースケール・半透明を維持する（二値化を防ぐ）
+    canvas.drawColor(Colors.transparent, BlendMode.clear);
     final layerBaseImage = _getLayerBaseImage(layer);
     if (layerBaseImage != null) {
       canvas.drawImage(layerBaseImage, Offset.zero, Paint());

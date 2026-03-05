@@ -22,6 +22,7 @@ enum ToolType {
 enum DrawingLayer {
   layerA,
   layerB,
+  layerC,
 }
 
 enum SelectionHandle {

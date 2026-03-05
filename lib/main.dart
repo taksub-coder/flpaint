@@ -1,4 +1,4 @@
-//flpaint_プロトタイプ1.6_文字入力第２調整版
+//flpaint_プロトタイプ1.7_矩形二値化修正
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -29,7 +29,7 @@ void main() async {
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
-      title: 'flpaint_プロトタイプ1.5_文字入力第一調整版',
+      title: 'flpaint_プロトタイプ1.7_矩形二値化修正',
       // 必要に応じて windowButtonVisibility: false, などを追加可能
     );
 

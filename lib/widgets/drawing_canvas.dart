@@ -7,7 +7,8 @@ import '../providers/drawing_provider.dart';
 
 class DrawingCanvas extends StatefulWidget {
   final ValueChanged<Offset>? onTwoFingerPan;
-  final void Function(Offset focalPointGlobal, double scaleDelta)? onTwoFingerScale;
+  final void Function(Offset focalPointGlobal, double scaleDelta)?
+      onTwoFingerScale;
   final Offset Function(Offset globalPoint)? toCanvas;
   final ValueChanged<bool>? onSelectionHandleInteractionChanged;
   const DrawingCanvas({
@@ -37,8 +38,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   Offset? _tapDownPosition;
   static const Duration _flipDebounceDuration = Duration(milliseconds: 500);
   //もっと長い距離をかけて細くしたい場合は、以下の定数を大きくします。
-  static const double _minHandleDistance = 60.0;// 入り
-  static const double _rotationSoftRadius = 80.0;// 抜き（払い）は特にながく
+  static const double _minHandleDistance = 60.0; // 入り
+  static const double _rotationSoftRadius = 80.0; // 抜き（払い）は特にながく
   static const double _rotationSensitivity = 0.85;
 
   @override
@@ -58,7 +59,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
               onPointerDown: (event) => _handlePointerDown(event, drawing),
               onPointerMove: (event) => _handlePointerMove(event, drawing),
               onPointerUp: (event) => _handlePointerUpOrCancel(event, drawing),
-              onPointerCancel: (event) => _handlePointerUpOrCancel(event, drawing),
+              onPointerCancel: (event) =>
+                  _handlePointerUpOrCancel(event, drawing),
               child: IgnorePointer(
                 ignoring: _ignoreDrawingGestures,
                 child: GestureDetector(
@@ -73,12 +75,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                     painter: DrawingPainter(
                       layerALines: drawing.layerALines,
                       layerBLines: drawing.layerBLines,
+                      layerCLines: drawing.layerCLines,
                       isLayerAVisible: drawing.isLayerAVisible,
                       isLayerBVisible: drawing.isLayerBVisible,
+                      isLayerCVisible: drawing.isLayerCVisible,
                       layerAOpacity: drawing.layerAOpacity,
                       layerBOpacity: drawing.layerBOpacity,
+                      layerCOpacity: drawing.layerCOpacity,
                       layerABaseImage: drawing.layerABaseImage,
                       layerBBaseImage: drawing.layerBBaseImage,
+                      layerCBaseImage: drawing.layerCBaseImage,
                       tone30Shader: drawing.tone30Shader,
                       tone60Shader: drawing.tone60Shader,
                       tone80Shader: drawing.tone80Shader,
@@ -136,8 +142,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _syncIgnoreDrawingGestures() {
-    final bool shouldIgnore =
-        _isTwoFingerTouchActive ||
+    final bool shouldIgnore = _isTwoFingerTouchActive ||
         _activeSelectionPointer != null ||
         _activeDrawPointer != null;
     if (_ignoreDrawingGestures == shouldIgnore) return;
@@ -155,7 +160,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _syncIgnoreDrawingGestures();
   }
 
-  bool _beginSelectionHandleDrag(PointerDownEvent event, DrawingProvider drawing) {
+  bool _beginSelectionHandleDrag(
+      PointerDownEvent event, DrawingProvider drawing) {
     if (drawing.currentTool != ToolType.lasso || drawing.selection == null) {
       return false;
     }
@@ -394,7 +400,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           pos,
           handleRadius: 24,
         );
-        if (handle != SelectionHandle.none && handle != SelectionHandle.mirror) {
+        if (handle != SelectionHandle.none &&
+            handle != SelectionHandle.mirror) {
           drawing.beginSelectionInteraction();
           final sel = drawing.selection!;
           _dragState = SelectionDragState(
@@ -485,8 +492,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   double _stableAngleDelta(Offset startVec, Offset currentVec) {
     // Signed angle between vectors, normalized to [-pi, pi].
-    final double cross = startVec.dx * currentVec.dy - startVec.dy * currentVec.dx;
-    final double dot = startVec.dx * currentVec.dx + startVec.dy * currentVec.dy;
+    final double cross =
+        startVec.dx * currentVec.dy - startVec.dy * currentVec.dx;
+    final double dot =
+        startVec.dx * currentVec.dx + startVec.dy * currentVec.dy;
     return math.atan2(cross, dot);
   }
 
@@ -512,18 +521,23 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       case SelectionHandle.cornerTR:
       case SelectionHandle.cornerBR:
       case SelectionHandle.cornerBL:
-        final localCurrent = _toLocalAtDragStart(currentPos, state, selection.baseRect);
+        final localCurrent =
+            _toLocalAtDragStart(currentPos, state, selection.baseRect);
         final startVec = state.startLocal - center;
         final currentVec = localCurrent - center;
         final startLen = startVec.distance;
         final currentLen = currentVec.distance;
         if (startLen > 0.001 && currentLen > 0.001) {
           final double safeStartLen = math.max(startLen, _minHandleDistance);
-          final double safeCurrentLen = math.max(currentLen, _minHandleDistance);
+          final double safeCurrentLen =
+              math.max(currentLen, _minHandleDistance);
           final scale = safeCurrentLen / safeStartLen;
           final double baseAngle = _stableAngleDelta(startVec, currentVec);
-          final double radiusFactor = (math.min(startLen, currentLen) / _rotationSoftRadius).clamp(0.35, 1.0);
-          final double rotationDelta = baseAngle * radiusFactor * _rotationSensitivity;
+          final double radiusFactor =
+              (math.min(startLen, currentLen) / _rotationSoftRadius)
+                  .clamp(0.35, 1.0);
+          final double rotationDelta =
+              baseAngle * radiusFactor * _rotationSensitivity;
           drawing.setSelectionTransform(
             translation: state.initialTranslation,
             scaleX: state.initialScaleX * scale,
@@ -534,14 +548,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         break;
       case SelectionHandle.edgeLeft:
       case SelectionHandle.edgeRight:
-        final localCurrent = _toLocalAtDragStart(currentPos, state, selection.baseRect);
+        final localCurrent =
+            _toLocalAtDragStart(currentPos, state, selection.baseRect);
         final startVec = state.startLocal - center;
         final currentVec = localCurrent - center;
         final startAxis = startVec.dx.abs();
         final currentAxis = currentVec.dx.abs();
         if (startAxis > 0.001) {
           final double safeStartAxis = math.max(startAxis, _minHandleDistance);
-          final double safeCurrentAxis = math.max(currentAxis, _minHandleDistance);
+          final double safeCurrentAxis =
+              math.max(currentAxis, _minHandleDistance);
           final scaleX = (safeCurrentAxis / safeStartAxis).clamp(0.05, 20.0);
           drawing.setSelectionTransform(
             translation: state.initialTranslation,
@@ -553,14 +569,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         break;
       case SelectionHandle.edgeTop:
       case SelectionHandle.edgeBottom:
-        final localCurrent = _toLocalAtDragStart(currentPos, state, selection.baseRect);
+        final localCurrent =
+            _toLocalAtDragStart(currentPos, state, selection.baseRect);
         final startVec = state.startLocal - center;
         final currentVec = localCurrent - center;
         final startAxis = startVec.dy.abs();
         final currentAxis = currentVec.dy.abs();
         if (startAxis > 0.001) {
           final double safeStartAxis = math.max(startAxis, _minHandleDistance);
-          final double safeCurrentAxis = math.max(currentAxis, _minHandleDistance);
+          final double safeCurrentAxis =
+              math.max(currentAxis, _minHandleDistance);
           final scaleY = (safeCurrentAxis / safeStartAxis).clamp(0.05, 20.0);
           drawing.setSelectionTransform(
             translation: state.initialTranslation,
@@ -598,12 +616,16 @@ class SelectionDragState {
 class DrawingPainter extends CustomPainter {
   final List<DrawnLine> layerALines;
   final List<DrawnLine> layerBLines;
+  final List<DrawnLine> layerCLines;
   final bool isLayerAVisible;
   final bool isLayerBVisible;
+  final bool isLayerCVisible;
   final double layerAOpacity;
   final double layerBOpacity;
+  final double layerCOpacity;
   final ui.Image? layerABaseImage;
   final ui.Image? layerBBaseImage;
+  final ui.Image? layerCBaseImage;
   final ui.ImageShader? tone30Shader;
   final ui.ImageShader? tone60Shader;
   final ui.ImageShader? tone80Shader;
@@ -620,12 +642,16 @@ class DrawingPainter extends CustomPainter {
   DrawingPainter({
     required this.layerALines,
     required this.layerBLines,
+    required this.layerCLines,
     required this.isLayerAVisible,
     required this.isLayerBVisible,
+    required this.isLayerCVisible,
     required this.layerAOpacity,
     required this.layerBOpacity,
+    required this.layerCOpacity,
     required this.layerABaseImage,
     required this.layerBBaseImage,
+    required this.layerCBaseImage,
     required this.tone30Shader,
     required this.tone60Shader,
     required this.tone80Shader,
@@ -655,6 +681,11 @@ class DrawingPainter extends CustomPainter {
             selection!.layer == DrawingLayer.layerB
         ? selection!.maskPath
         : null;
+    final Path? layerCHolePath = selectionMasksSource &&
+            selection != null &&
+            selection!.layer == DrawingLayer.layerC
+        ? selection!.maskPath
+        : null;
 
     _drawLayer(
       canvas,
@@ -674,11 +705,27 @@ class DrawingPainter extends CustomPainter {
       opacity: layerBOpacity,
       holePath: layerBHolePath,
     );
+    _drawLayer(
+      canvas,
+      size,
+      layerCBaseImage,
+      layerCLines,
+      isVisible: isLayerCVisible,
+      opacity: layerCOpacity,
+      holePath: layerCHolePath,
+    );
 
     if (selection != null) {
-      final bool inLayerA = selection!.layer == DrawingLayer.layerA;
-      final bool selectionVisible = inLayerA ? isLayerAVisible : isLayerBVisible;
-      final double selectionOpacity = inLayerA ? layerAOpacity : layerBOpacity;
+      final bool selectionVisible = switch (selection!.layer) {
+        DrawingLayer.layerA => isLayerAVisible,
+        DrawingLayer.layerB => isLayerBVisible,
+        DrawingLayer.layerC => isLayerCVisible,
+      };
+      final double selectionOpacity = switch (selection!.layer) {
+        DrawingLayer.layerA => layerAOpacity,
+        DrawingLayer.layerB => layerBOpacity,
+        DrawingLayer.layerC => layerCOpacity,
+      };
       if (selectionVisible && selectionOpacity > 0) {
         canvas.saveLayer(
           Rect.fromLTWH(0, 0, size.width, size.height),
@@ -746,16 +793,17 @@ class DrawingPainter extends CustomPainter {
         ..color = (toneShader == null ? line.color : Colors.white)
             .withValues(alpha: line.eraserAlpha)
         ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
-        ..filterQuality = toneShader == null
-            ? FilterQuality.low
-            : FilterQuality.high;
+        ..filterQuality =
+            toneShader == null ? FilterQuality.low : FilterQuality.high;
 
       switch (line.tool) {
         case ToolType.rect:
         case ToolType.fillRect:
           if (line.shapeRect == null) continue;
           paint
-            ..style = line.tool == ToolType.fillRect ? PaintingStyle.fill : PaintingStyle.stroke
+            ..style = line.tool == ToolType.fillRect
+                ? PaintingStyle.fill
+                : PaintingStyle.stroke
             ..strokeCap = StrokeCap.butt
             ..strokeJoin = StrokeJoin.miter
             ..strokeWidth = line.width;
@@ -765,7 +813,9 @@ class DrawingPainter extends CustomPainter {
         case ToolType.fillCircle:
           if (line.shapeRect == null) continue;
           paint
-            ..style = line.tool == ToolType.fillCircle ? PaintingStyle.fill : PaintingStyle.stroke
+            ..style = line.tool == ToolType.fillCircle
+                ? PaintingStyle.fill
+                : PaintingStyle.stroke
             ..strokeWidth = line.width;
           canvas.drawOval(line.shapeRect!, paint);
           break;
@@ -929,7 +979,8 @@ class DrawingPainter extends CustomPainter {
     for (int i = 1; i < points.length; i++) {
       final previous = result.last;
       final current = points[i];
-      final filteredOffset = Offset.lerp(previous.offset, current.offset, factor)!;
+      final filteredOffset =
+          Offset.lerp(previous.offset, current.offset, factor)!;
       result.add(Point(filteredOffset, current.width));
     }
     return result;
@@ -939,7 +990,8 @@ class DrawingPainter extends CustomPainter {
     final path = Path();
     if (points.isEmpty) return path;
     if (points.length == 1) {
-      path.addOval(Rect.fromCircle(center: points.first.offset, radius: points.first.width / 2));
+      path.addOval(Rect.fromCircle(
+          center: points.first.offset, radius: points.first.width / 2));
       return path;
     }
     final filtered = _lowPassFilter(points, factor: 0.6);
@@ -1012,13 +1064,29 @@ class DrawingPainter extends CustomPainter {
           0.5 *
               ((2 * p1.offset.dx) +
                   (-p0.offset.dx + p2.offset.dx) * t +
-                  (2 * p0.offset.dx - 5 * p1.offset.dx + 4 * p2.offset.dx - p3.offset.dx) * t2 +
-                  (-p0.offset.dx + 3 * p1.offset.dx - 3 * p2.offset.dx + p3.offset.dx) * t3),
+                  (2 * p0.offset.dx -
+                          5 * p1.offset.dx +
+                          4 * p2.offset.dx -
+                          p3.offset.dx) *
+                      t2 +
+                  (-p0.offset.dx +
+                          3 * p1.offset.dx -
+                          3 * p2.offset.dx +
+                          p3.offset.dx) *
+                      t3),
           0.5 *
               ((2 * p1.offset.dy) +
                   (-p0.offset.dy + p2.offset.dy) * t +
-                  (2 * p0.offset.dy - 5 * p1.offset.dy + 4 * p2.offset.dy - p3.offset.dy) * t2 +
-                  (-p0.offset.dy + 3 * p1.offset.dy - 3 * p2.offset.dy + p3.offset.dy) * t3),
+                  (2 * p0.offset.dy -
+                          5 * p1.offset.dy +
+                          4 * p2.offset.dy -
+                          p3.offset.dy) *
+                      t2 +
+                  (-p0.offset.dy +
+                          3 * p1.offset.dy -
+                          3 * p2.offset.dy +
+                          p3.offset.dy) *
+                      t3),
         );
         final width = ui.lerpDouble(p1.width, p2.width, t)!;
         dense.add(Point(pos, width));

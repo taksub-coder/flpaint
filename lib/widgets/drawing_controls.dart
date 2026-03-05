@@ -13,9 +13,10 @@ class DrawingControls extends StatelessWidget {
       builder: (context, drawing, _) {
         final layerASliderValue = (1.0 - drawing.layerAOpacity) * 100.0;
         final layerBSliderValue = (1.0 - drawing.layerBOpacity) * 100.0;
+        final layerCSliderValue = (1.0 - drawing.layerCOpacity) * 100.0;
 
         return SizedBox(
-          height: 82,
+          height: 118,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -53,18 +54,30 @@ class DrawingControls extends StatelessWidget {
                       label: 'レイヤーA',
                       selected: drawing.activeLayer == DrawingLayer.layerA,
                       visible: drawing.isLayerAVisible,
-                      onSelect: () => drawing.setActiveLayer(DrawingLayer.layerA),
-                      onToggleVisible: (value) =>
-                          drawing.setLayerVisibility(DrawingLayer.layerA, value),
+                      onSelect: () =>
+                          drawing.setActiveLayer(DrawingLayer.layerA),
+                      onToggleVisible: (value) => drawing.setLayerVisibility(
+                          DrawingLayer.layerA, value),
                     ),
                     const SizedBox(height: 2),
                     _LayerRowButtons(
                       label: 'レイヤーB',
                       selected: drawing.activeLayer == DrawingLayer.layerB,
                       visible: drawing.isLayerBVisible,
-                      onSelect: () => drawing.setActiveLayer(DrawingLayer.layerB),
-                      onToggleVisible: (value) =>
-                          drawing.setLayerVisibility(DrawingLayer.layerB, value),
+                      onSelect: () =>
+                          drawing.setActiveLayer(DrawingLayer.layerB),
+                      onToggleVisible: (value) => drawing.setLayerVisibility(
+                          DrawingLayer.layerB, value),
+                    ),
+                    const SizedBox(height: 2),
+                    _LayerRowButtons(
+                      label: 'レイヤーC',
+                      selected: drawing.activeLayer == DrawingLayer.layerC,
+                      visible: drawing.isLayerCVisible,
+                      onSelect: () =>
+                          drawing.setActiveLayer(DrawingLayer.layerC),
+                      onToggleVisible: (value) => drawing.setLayerVisibility(
+                          DrawingLayer.layerC, value),
                     ),
                   ],
                 ),
@@ -98,6 +111,19 @@ class DrawingControls extends StatelessWidget {
                         1.0 - value / 100.0,
                       ),
                       valueText: '${(100.0 - layerBSliderValue).round()}',
+                    ),
+                    const SizedBox(height: 2),
+                    _SliderRow(
+                      symbol: 'C',
+                      value: layerCSliderValue,
+                      min: 0,
+                      max: 100,
+                      divisions: 100,
+                      onChanged: (value) => drawing.setLayerOpacity(
+                        DrawingLayer.layerC,
+                        1.0 - value / 100.0,
+                      ),
+                      valueText: '${(100.0 - layerCSliderValue).round()}',
                     ),
                   ],
                 ),
@@ -139,7 +165,8 @@ class _SliderRow extends StatelessWidget {
             width: 14,
             child: Text(
               symbol,
-              style: const TextStyle(fontSize: 14, color: Color(0xFF6F6A22), height: 1.0),
+              style: const TextStyle(
+                  fontSize: 14, color: Color(0xFF6F6A22), height: 1.0),
             ),
           ),
           Expanded(
