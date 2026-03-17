@@ -830,7 +830,11 @@ class DrawingPainter extends CustomPainter {
           Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
           Paint()..color = Colors.white.withValues(alpha: selectionOpacity),
         );
-        _paintSelection(canvas, selection!);
+        _paintSelection(
+          canvas,
+          selection!,
+          renderFromSource: selectionMasksSource,
+        );
         canvas.restore();
         _paintSelectionOverlay(canvas, selection!, handles);
       }
@@ -865,7 +869,7 @@ class DrawingPainter extends CustomPainter {
         Offset.zero,
         Paint()
           ..isAntiAlias = false
-          ..filterQuality = FilterQuality.low,
+          ..filterQuality = FilterQuality.none,
       );
     }
     _drawLines(canvas, lines);
@@ -874,7 +878,7 @@ class DrawingPainter extends CustomPainter {
         holePath,
         Paint()
           ..blendMode = BlendMode.clear
-          ..isAntiAlias = true,
+          ..isAntiAlias = false,
       );
     }
     canvas.restore();
@@ -888,14 +892,15 @@ class DrawingPainter extends CustomPainter {
 
     for (final line in lines) {
       final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
+      final bool isToneStroke = toneShader != null;
       paint
-        ..isAntiAlias = true
+        ..isAntiAlias = !isToneStroke
         ..shader = toneShader
         ..color = (toneShader == null ? line.color : Colors.white)
             .withValues(alpha: line.eraserAlpha)
         ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
         ..filterQuality =
-            toneShader == null ? FilterQuality.low : FilterQuality.high;
+            toneShader == null ? FilterQuality.low : FilterQuality.none;
 
       switch (line.tool) {
         case ToolType.rect:
@@ -977,7 +982,11 @@ class DrawingPainter extends CustomPainter {
     }
   }
 
-  void _paintSelection(Canvas canvas, LassoSelection selection) {
+  void _paintSelection(
+    Canvas canvas,
+    LassoSelection selection, {
+    required bool renderFromSource,
+  }) {
     final Rect rect = selection.baseRect;
     final Offset center = rect.center + selection.translation;
     canvas.save();
@@ -985,14 +994,44 @@ class DrawingPainter extends CustomPainter {
     canvas.rotate(selection.rotation);
     canvas.scale(selection.scaleX, selection.scaleY);
     canvas.translate(-rect.center.dx, -rect.center.dy);
-    paintImage(
-      canvas: canvas,
-      rect: rect,
-      image: selection.image,
-      fit: BoxFit.fill,
-      filterQuality: FilterQuality.low,
-    );
+    if (renderFromSource) {
+      canvas.save();
+      canvas.clipPath(selection.maskPath, doAntiAlias: false);
+      _paintSelectionSourceLayer(canvas, selection.layer);
+      canvas.restore();
+    } else {
+      paintImage(
+        canvas: canvas,
+        rect: rect,
+        image: selection.image,
+        fit: BoxFit.fill,
+        filterQuality: FilterQuality.none,
+      );
+    }
     canvas.restore();
+  }
+
+  void _paintSelectionSourceLayer(Canvas canvas, DrawingLayer layer) {
+    final ui.Image? baseImage = switch (layer) {
+      DrawingLayer.layerA => layerABaseImage,
+      DrawingLayer.layerB => layerBBaseImage,
+      DrawingLayer.layerC => layerCBaseImage,
+    };
+    final List<DrawnLine> lines = switch (layer) {
+      DrawingLayer.layerA => layerALines,
+      DrawingLayer.layerB => layerBLines,
+      DrawingLayer.layerC => layerCLines,
+    };
+    if (baseImage != null) {
+      canvas.drawImage(
+        baseImage,
+        Offset.zero,
+        Paint()
+          ..isAntiAlias = false
+          ..filterQuality = FilterQuality.none,
+      );
+    }
+    _drawLines(canvas, lines);
   }
 
   void _paintSelectionOverlay(

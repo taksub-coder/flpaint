@@ -12,7 +12,7 @@ import 'package:myapp/main.dart';
 import 'package:myapp/providers/drawing_provider.dart';
 
 void main() {
-  testWidgets('Drawing App smoke test', (WidgetTester tester) async {
+  testWidgets('FLPaint smoke test', (WidgetTester tester) async {
     await tester.pumpWidget(
       ChangeNotifierProvider(
         create: (_) => DrawingProvider(),
@@ -20,7 +20,6 @@ void main() {
       ),
     );
 
-    // Verify the app has loaded with the title
-    expect(find.text('Drawing App'), findsOneWidget);
+    expect(find.text('FLPaint'), findsOneWidget);
   });
 }

@@ -128,6 +128,13 @@ class ToolSidebar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _ToolButton(
+                  label: 'Merge',
+                  tooltip: 'Merge all layers into the active layer',
+                  selected: false,
+                  onTap: () => drawing.mergeLayersToActiveLayer(),
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
                   label: 'あ',
                   tooltip: 'Text input',
                   selected: false,
@@ -340,7 +347,7 @@ class _TextInputDialogState extends State<_TextInputDialog> {
   late final FocusNode _inputFocusNode;
   _TextFontOption _fontOption = _TextFontOption.gothic;
   _TextSizeOption _sizeOption = _TextSizeOption.medium;
-  _TextDirectionOption _directionOption = _TextDirectionOption.horizontal;
+  _TextDirectionOption _directionOption = _TextDirectionOption.vertical;
 
   @override
   void initState() {
@@ -526,7 +533,10 @@ class _ToolButton extends StatelessWidget {
           ? Icon(icon, size: 18, color: Colors.black87)
           : Text(
               label ?? '',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: (label?.length ?? 0) > 3 ? 11 : 16,
+                fontWeight: FontWeight.bold,
+              ),
             ),
     );
 

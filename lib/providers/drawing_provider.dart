@@ -187,6 +187,8 @@ class DrawingProvider extends ChangeNotifier {
   static const double _lassoSelectionSuperSample = 1.0;
   static const int _toneTileSize = 2;
   static const int _toneSuperSampleScale = 8;
+  static const double _horizontalTextLineHeight = 1.2;
+  static const double _textSelectionPaddingLines = 1.0;
   static const double _verticalPunctuationNudgePoints = 3.0;
   static const Set<String> _verticalSpecialGlyphs = <String>{
     'っ',
@@ -345,13 +347,13 @@ class DrawingProvider extends ChangeNotifier {
   Future<ui.Image> _createToneTileImage({
     required int blackPixels,
   }) async {
-    final int sourceSize = _toneTileSize * _toneSuperSampleScale;
+    const int sourceSize = _toneTileSize * _toneSuperSampleScale;
     final double sourceScale = _toneSuperSampleScale.toDouble();
     final sourceRecorder = ui.PictureRecorder();
     final sourceCanvas = Canvas(sourceRecorder);
     sourceCanvas.drawColor(Colors.transparent, BlendMode.src);
     final dotPaint = Paint()
-      ..color = const Color(0xF2010101)
+      ..color = const Color(0xFF000000)
       ..isAntiAlias = false;
 
     final pixels = <Offset>[];
@@ -450,17 +452,56 @@ class DrawingProvider extends ChangeNotifier {
 
   void setLayerOpacity(DrawingLayer layer, double opacity) {
     final clamped = opacity.clamp(0.0, 1.0).toDouble();
-    switch (layer) {
-      case DrawingLayer.layerA:
-        _layerAOpacity = clamped;
-        break;
-      case DrawingLayer.layerB:
-        _layerBOpacity = clamped;
-        break;
-      case DrawingLayer.layerC:
-        _layerCOpacity = clamped;
-        break;
+    _setLayerOpacityValue(layer, clamped);
+    notifyListeners();
+  }
+
+  Future<void> mergeLayersToActiveLayer() async {
+    final Size canvasSize =
+        _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    if (canvasSize == Size.zero) return;
+
+    _saveState();
+    final List<ui.Image> snapshots = await Future.wait<ui.Image>(
+      _backupLayers.map((DrawingLayer layer) {
+        return _renderLayerSnapshot(layer, canvasSize);
+      }),
+    );
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final Rect bounds =
+        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+
+    for (int i = 0; i < _backupLayers.length; i++) {
+      final double opacity = _layerOpacityFor(_backupLayers[i]);
+      if (opacity <= 0) continue;
+      canvas.saveLayer(
+        bounds,
+        Paint()..color = Colors.white.withValues(alpha: opacity),
+      );
+      canvas.drawImage(snapshots[i], Offset.zero, Paint());
+      canvas.restore();
     }
+
+    final picture = recorder.endRecording();
+    final ui.Image merged = await picture.toImage(
+      canvasSize.width.ceil(),
+      canvasSize.height.ceil(),
+    );
+
+    for (final DrawingLayer layer in _backupLayers) {
+      _setLayerBaseImage(layer, null);
+      _clearLayerLines(layer);
+    }
+
+    _setLayerBaseImage(_activeLayer, merged);
+    _setLayerOpacityValue(_activeLayer, 1.0);
+    _setLayerVisibilityValue(_activeLayer, true);
+    _lassoPoints.clear();
+    _isDrawingLasso = false;
+    _resetSelectionState();
     notifyListeners();
   }
 
@@ -735,7 +776,12 @@ class DrawingProvider extends ChangeNotifier {
       if (_selectionMasksSource) {
         _clearSelectionArea(canvas, _selection!);
       }
-      _paintSelection(canvas, _selection!);
+      _paintSelection(
+        canvas,
+        _selection!,
+        canvasSize: size,
+        renderFromSource: _selectionMasksSource,
+      );
     }
     canvas.restore();
   }
@@ -993,7 +1039,12 @@ class DrawingProvider extends ChangeNotifier {
       if (_selectionMasksSource) {
         _clearSelectionArea(canvas, _selection!);
       }
-      _paintSelection(canvas, _selection!);
+      _paintSelection(
+        canvas,
+        _selection!,
+        canvasSize: size,
+        renderFromSource: _selectionMasksSource,
+      );
     }
 
     final picture = recorder.endRecording();
@@ -1105,6 +1156,45 @@ class DrawingProvider extends ChangeNotifier {
     }
   }
 
+  double _layerOpacityFor(DrawingLayer layer) {
+    switch (layer) {
+      case DrawingLayer.layerA:
+        return _layerAOpacity;
+      case DrawingLayer.layerB:
+        return _layerBOpacity;
+      case DrawingLayer.layerC:
+        return _layerCOpacity;
+    }
+  }
+
+  void _setLayerOpacityValue(DrawingLayer layer, double opacity) {
+    switch (layer) {
+      case DrawingLayer.layerA:
+        _layerAOpacity = opacity;
+        break;
+      case DrawingLayer.layerB:
+        _layerBOpacity = opacity;
+        break;
+      case DrawingLayer.layerC:
+        _layerCOpacity = opacity;
+        break;
+    }
+  }
+
+  void _setLayerVisibilityValue(DrawingLayer layer, bool isVisible) {
+    switch (layer) {
+      case DrawingLayer.layerA:
+        _isLayerAVisible = isVisible;
+        break;
+      case DrawingLayer.layerB:
+        _isLayerBVisible = isVisible;
+        break;
+      case DrawingLayer.layerC:
+        _isLayerCVisible = isVisible;
+        break;
+    }
+  }
+
   void _setLayerBaseImage(DrawingLayer layer, ui.Image? image) {
     switch (layer) {
       case DrawingLayer.layerA:
@@ -1192,7 +1282,7 @@ class DrawingProvider extends ChangeNotifier {
     }
 
     final totalLen = cumulative.last;
-    final taperOutLen = _pressureTaperOutBase; // 14.0を使用
+    const taperOutLen = _pressureTaperOutBase; // 14.0を使用
     final taperStart = math.max(0.0, totalLen - taperOutLen);
 
     for (int i = 0; i < pts.length; i++) {
@@ -1218,8 +1308,6 @@ class DrawingProvider extends ChangeNotifier {
         return Colors.black;
     }
   }
-
-  double _easeOutQuad(double t) => 1 - (1 - t) * (1 - t);
 
   void undo() {
     if (_undoStack.isEmpty) return;
@@ -1582,7 +1670,7 @@ class DrawingProvider extends ChangeNotifier {
 
     _saveState();
     final path = Path()..addPolygon(List.of(_lassoPoints), true);
-    final bounds = path.getBounds();
+    final bounds = _snapRectToCanvasPixels(path.getBounds(), size);
     _lassoPoints.clear();
     _isDrawingLasso = false;
 
@@ -1639,7 +1727,7 @@ class DrawingProvider extends ChangeNotifier {
         layerBaseImage,
         Offset.zero,
         Paint()
-          ..filterQuality = FilterQuality.low
+          ..filterQuality = FilterQuality.none
           ..isAntiAlias = false,
       );
     }
@@ -1660,7 +1748,7 @@ class DrawingProvider extends ChangeNotifier {
       Rect.fromLTWH(0, 0, bounds.width, bounds.height),
       Paint()
         ..isAntiAlias = false
-        ..filterQuality = FilterQuality.low,
+        ..filterQuality = FilterQuality.none,
     );
     final downsamplePicture = downsampleRecorder.endRecording();
     return downsamplePicture.toImage(bounds.width.ceil(), bounds.height.ceil());
@@ -1723,7 +1811,7 @@ class DrawingProvider extends ChangeNotifier {
     BuildContext? context,
     String? fontFamily,
     double fontSize = 32,
-    bool vertical = false,
+    bool vertical = true,
   }) async {
     if (text.trim().isEmpty) return;
 
@@ -1771,7 +1859,8 @@ class DrawingProvider extends ChangeNotifier {
     required bool vertical,
     required double maxWidth,
   }) async {
-    return vertical
+    final int paddingPx = _textSelectionPaddingPixels(fontSize);
+    final Future<ui.Image> renderFuture = vertical
         ? _buildVerticalTextImage(
             text: text,
             fontFamily: fontFamily,
@@ -1782,8 +1871,13 @@ class DrawingProvider extends ChangeNotifier {
             context: context,
             fontFamily: fontFamily,
             fontSize: fontSize,
-            maxWidth: maxWidth,
+            maxWidth: math.max(1.0, maxWidth - (paddingPx * 2)),
           );
+    final ui.Image renderedText = await renderFuture;
+    return _padImageWithTransparentMargin(
+      renderedText,
+      paddingPx: paddingPx,
+    );
   }
 
   Future<ui.Image> _buildHorizontalTextImage({
@@ -1803,7 +1897,7 @@ class DrawingProvider extends ChangeNotifier {
           style: TextStyle(
             color: Colors.black,
             fontSize: fontSize,
-            height: 1.2,
+            height: _horizontalTextLineHeight,
             fontFamily: fontFamily,
           ),
         ),
@@ -1820,7 +1914,7 @@ class DrawingProvider extends ChangeNotifier {
         style: TextStyle(
           color: Colors.black,
           fontSize: fontSize,
-          height: 1.2,
+          height: _horizontalTextLineHeight,
           fontFamily: fontFamily,
         ),
       ),
@@ -1835,6 +1929,44 @@ class DrawingProvider extends ChangeNotifier {
     textPainter.paint(canvas, Offset.zero);
     final picture = recorder.endRecording();
     return picture.toImage(width, height);
+  }
+
+  int _textSelectionPaddingPixels(double fontSize) {
+    return math.max(
+      16,
+      (fontSize * _horizontalTextLineHeight * _textSelectionPaddingLines)
+          .ceil(),
+    );
+  }
+
+  Future<ui.Image> _padImageWithTransparentMargin(
+    ui.Image source, {
+    required int paddingPx,
+  }) async {
+    if (paddingPx <= 0) return source;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+    canvas.drawImage(
+      source,
+      Offset(paddingPx.toDouble(), paddingPx.toDouble()),
+      Paint(),
+    );
+    final picture = recorder.endRecording();
+    return picture.toImage(
+      source.width + (paddingPx * 2),
+      source.height + (paddingPx * 2),
+    );
+  }
+
+  Rect _snapRectToCanvasPixels(Rect rect, Size canvasSize) {
+    return Rect.fromLTRB(
+      rect.left.floorToDouble().clamp(0.0, canvasSize.width),
+      rect.top.floorToDouble().clamp(0.0, canvasSize.height),
+      rect.right.ceilToDouble().clamp(0.0, canvasSize.width),
+      rect.bottom.ceilToDouble().clamp(0.0, canvasSize.height),
+    );
   }
 
   Future<ui.Image> _buildVerticalTextImage({
@@ -2072,7 +2204,6 @@ class DrawingProvider extends ChangeNotifier {
   // Selection manipulation
   Map<SelectionHandle, Offset> _handlePositions(LassoSelection selection) {
     final corners = selection.transformedCorners();
-    final bounds = selection.transformedBounds();
     final Map<SelectionHandle, Offset> handles = {
       SelectionHandle.cornerTL: corners[0],
       SelectionHandle.cornerTR: corners[1],
@@ -2229,7 +2360,12 @@ class DrawingProvider extends ChangeNotifier {
     if (clearSelectionArea) {
       _clearSelectionArea(canvas, selection);
     }
-    _paintSelection(canvas, selection);
+    _paintSelection(
+      canvas,
+      selection,
+      canvasSize: size,
+      renderFromSource: _selectionMasksSource,
+    );
     final picture = recorder.endRecording();
     return picture.toImage(size.width.ceil(), size.height.ceil());
   }
@@ -2257,8 +2393,9 @@ class DrawingProvider extends ChangeNotifier {
     for (final line in _lines) {
       if (layer != null && line.layer != layer) continue;
       final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
+      final bool isToneStroke = toneShader != null;
       paint
-        ..isAntiAlias = true
+        ..isAntiAlias = !isToneStroke
         ..shader = toneShader
         ..color = (toneShader == null ? line.color : Colors.white)
             .withValues(alpha: line.eraserAlpha)
@@ -2267,7 +2404,7 @@ class DrawingProvider extends ChangeNotifier {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..filterQuality =
-            toneShader == null ? FilterQuality.low : FilterQuality.high;
+            toneShader == null ? FilterQuality.low : FilterQuality.none;
 
       switch (line.tool) {
         case ToolType.rect:
@@ -2448,11 +2585,16 @@ class DrawingProvider extends ChangeNotifier {
       selection.maskPath,
       Paint()
         ..blendMode = BlendMode.clear
-        ..isAntiAlias = true,
+        ..isAntiAlias = false,
     );
   }
 
-  void _paintSelection(Canvas canvas, LassoSelection selection) {
+  void _paintSelection(
+    Canvas canvas,
+    LassoSelection selection, {
+    required Size canvasSize,
+    required bool renderFromSource,
+  }) {
     final Rect rect = selection.baseRect;
     final Offset center = rect.center + selection.translation;
     canvas.save();
@@ -2460,13 +2602,30 @@ class DrawingProvider extends ChangeNotifier {
     canvas.rotate(selection.rotation);
     canvas.scale(selection.scaleX, selection.scaleY);
     canvas.translate(-rect.center.dx, -rect.center.dy);
-    paintImage(
-      canvas: canvas,
-      rect: rect,
-      image: selection.image,
-      fit: BoxFit.fill,
-      filterQuality: FilterQuality.low,
-    );
+    if (renderFromSource) {
+      canvas.save();
+      canvas.clipPath(selection.maskPath, doAntiAlias: false);
+      final ui.Image? layerBaseImage = _getLayerBaseImage(selection.layer);
+      if (layerBaseImage != null) {
+        canvas.drawImage(
+          layerBaseImage,
+          Offset.zero,
+          Paint()
+            ..isAntiAlias = false
+            ..filterQuality = FilterQuality.none,
+        );
+      }
+      _drawLines(canvas, canvasSize, layer: selection.layer);
+      canvas.restore();
+    } else {
+      paintImage(
+        canvas: canvas,
+        rect: rect,
+        image: selection.image,
+        fit: BoxFit.fill,
+        filterQuality: FilterQuality.none,
+      );
+    }
     canvas.restore();
   }
 
