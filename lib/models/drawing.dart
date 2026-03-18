@@ -44,6 +44,7 @@ class DrawnLine {
   final Color color;
   final double width;
   final ToolType tool;
+  final int sequence;
   final bool variableWidth;
   final bool isEraser;
   final double eraserAlpha; // 1.0 for normal strokes; 0.5/1.0 for eraser passes
@@ -56,6 +57,7 @@ class DrawnLine {
     required this.color,
     required this.width,
     required this.tool,
+    this.sequence = 0,
     required this.variableWidth,
     this.isEraser = false,
     this.eraserAlpha = 1.0,
@@ -75,6 +77,7 @@ class LassoSelection {
   final Image image;
   final Path maskPath;
   final DrawingLayer layer;
+  final double imageScale;
   Rect baseRect;
   Offset translation;
   double scaleX;
@@ -86,6 +89,7 @@ class LassoSelection {
     required this.maskPath,
     required this.layer,
     required this.baseRect,
+    this.imageScale = 1.0,
     this.translation = Offset.zero,
     this.scaleX = 1.0,
     this.scaleY = 1.0,
@@ -154,4 +158,30 @@ class LassoSelection {
     }
     return Rect.fromLTRB(minX, minY, maxX, maxY);
   }
+}
+
+class LayerPlacement {
+  final Image image;
+  final DrawingLayer targetLayer;
+  final int sequence;
+  final DrawingLayer? sourceLayer;
+  final Path? sourceMaskPath;
+  final Rect baseRect;
+  final Offset translation;
+  final double scaleX;
+  final double scaleY;
+  final double rotation;
+
+  LayerPlacement({
+    required this.image,
+    required this.targetLayer,
+    this.sequence = 0,
+    required this.baseRect,
+    this.sourceLayer,
+    this.sourceMaskPath,
+    this.translation = Offset.zero,
+    this.scaleX = 1.0,
+    this.scaleY = 1.0,
+    this.rotation = 0.0,
+  });
 }

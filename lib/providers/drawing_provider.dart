@@ -16,6 +16,8 @@ import '../models/drawing.dart';
 
 class _DrawingSnapshot {
   final List<DrawnLine> lines;
+  final List<LayerPlacement> placements;
+  final int nextSequence;
   final ui.Image? layerABaseImage;
   final ui.Image? layerBBaseImage;
   final ui.Image? layerCBaseImage;
@@ -26,6 +28,8 @@ class _DrawingSnapshot {
 
   _DrawingSnapshot({
     required this.lines,
+    required this.placements,
+    required this.nextSequence,
     required this.layerABaseImage,
     required this.layerBBaseImage,
     required this.layerCBaseImage,
@@ -87,6 +91,8 @@ enum _VerticalGlyphKind {
 
 class DrawingProvider extends ChangeNotifier {
   final List<DrawnLine> _lines = [];
+  final List<LayerPlacement> _placements = [];
+  int _nextSequence = 1;
   DrawnLine? _currentLine;
   Offset? _lineStartPoint;
 
@@ -118,6 +124,7 @@ class DrawingProvider extends ChangeNotifier {
   bool _selectionHandlesFilled = false;
   bool _selectionMergeToActiveLayer = false;
   ui.Image? _clipboardImage;
+  double _clipboardImageScale = 1.0;
 
   // Shapes
   Offset? _shapeStart;
@@ -142,6 +149,8 @@ class DrawingProvider extends ChangeNotifier {
   List<DrawnLine> get layerCLines => List<DrawnLine>.unmodifiable(
         _lines.where((line) => line.layer == DrawingLayer.layerC),
       );
+  List<LayerPlacement> get placements =>
+      List<LayerPlacement>.unmodifiable(_placements);
   double get strokeWidth => _strokeWidth;
   double get eraserWidth => _eraserWidth;
   ToolType get currentTool => _tool;
@@ -183,8 +192,7 @@ class DrawingProvider extends ChangeNotifier {
     DrawingLayer.layerC,
   ];
 
-  /// 1.0 にすることでダウンサンプ時のぼかしを防ぎ、輪郭を維持（元画像をそのまま表示）
-  static const double _lassoSelectionSuperSample = 1.0;
+  /// Tone tile settings.
   static const int _toneTileSize = 2;
   static const int _toneSuperSampleScale = 8;
   static const double _horizontalTextLineHeight = 1.2;
@@ -495,6 +503,7 @@ class DrawingProvider extends ChangeNotifier {
       _setLayerBaseImage(layer, null);
       _clearLayerLines(layer);
     }
+    _placements.clear();
 
     _setLayerBaseImage(_activeLayer, merged);
     _setLayerOpacityValue(_activeLayer, 1.0);
@@ -767,11 +776,7 @@ class DrawingProvider extends ChangeNotifier {
       Rect.fromLTWH(0, 0, size.width, size.height),
       Paint()..color = Colors.white.withValues(alpha: opacity),
     );
-    final layerBase = _getLayerBaseImage(layer);
-    if (layerBase != null) {
-      canvas.drawImage(layerBase, Offset.zero, Paint());
-    }
-    _drawLines(canvas, size, layer: layer);
+    _paintLayerSourceContents(canvas, layer);
     if (_selection != null && _selection!.layer == layer) {
       if (_selectionMasksSource) {
         _clearSelectionArea(canvas, _selection!);
@@ -779,8 +784,6 @@ class DrawingProvider extends ChangeNotifier {
       _paintSelection(
         canvas,
         _selection!,
-        canvasSize: size,
-        renderFromSource: _selectionMasksSource,
       );
     }
     canvas.restore();
@@ -966,6 +969,7 @@ class DrawingProvider extends ChangeNotifier {
     for (final layer in _backupLayers) {
       _clearLayerLines(layer);
     }
+    _placements.clear();
     _currentLine = null;
     _lineStartPoint = null;
     _lassoPoints.clear();
@@ -1030,11 +1034,7 @@ class DrawingProvider extends ChangeNotifier {
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
 
-    final ui.Image? layerBaseImage = _getLayerBaseImage(layer);
-    if (layerBaseImage != null) {
-      canvas.drawImage(layerBaseImage, Offset.zero, Paint());
-    }
-    _drawLines(canvas, size, layer: layer);
+    _paintLayerSourceContents(canvas, layer);
     if (_selection != null && _selection!.layer == layer) {
       if (_selectionMasksSource) {
         _clearSelectionArea(canvas, _selection!);
@@ -1042,8 +1042,6 @@ class DrawingProvider extends ChangeNotifier {
       _paintSelection(
         canvas,
         _selection!,
-        canvasSize: size,
-        renderFromSource: _selectionMasksSource,
       );
     }
 
@@ -1132,6 +1130,7 @@ class DrawingProvider extends ChangeNotifier {
   void clear() {
     _saveState();
     _lines.clear();
+    _placements.clear();
     _currentLine = null;
     _lineStartPoint = null;
     _lassoPoints.clear();
@@ -1329,9 +1328,20 @@ class DrawingProvider extends ChangeNotifier {
     _redoStack.clear();
   }
 
+  int _takeNextSequence() => _nextSequence++;
+
+  double _selectionImageScale() {
+    return math.max(
+      1.0,
+      ui.PlatformDispatcher.instance.implicitView?.devicePixelRatio ?? 1.0,
+    );
+  }
+
   _DrawingSnapshot _createSnapshot() {
     return _DrawingSnapshot(
       lines: List<DrawnLine>.from(_lines.map(_cloneLine)),
+      placements: List<LayerPlacement>.from(_placements.map(_clonePlacement)),
+      nextSequence: _nextSequence,
       layerABaseImage: _layerABaseImage,
       layerBBaseImage: _layerBBaseImage,
       layerCBaseImage: _layerCBaseImage,
@@ -1346,6 +1356,10 @@ class DrawingProvider extends ChangeNotifier {
     _lines
       ..clear()
       ..addAll(snapshot.lines.map(_cloneLine));
+    _placements
+      ..clear()
+      ..addAll(snapshot.placements.map(_clonePlacement));
+    _nextSequence = snapshot.nextSequence;
     _layerABaseImage = snapshot.layerABaseImage;
     _layerBBaseImage = snapshot.layerBBaseImage;
     _layerCBaseImage = snapshot.layerCBaseImage;
@@ -1361,6 +1375,7 @@ class DrawingProvider extends ChangeNotifier {
       color: src.color,
       width: src.width,
       tool: src.tool,
+      sequence: src.sequence,
       variableWidth: src.variableWidth,
       isEraser: src.isEraser,
       eraserAlpha: src.eraserAlpha,
@@ -1377,6 +1392,28 @@ class DrawingProvider extends ChangeNotifier {
     );
   }
 
+  LayerPlacement _clonePlacement(LayerPlacement src) {
+    return LayerPlacement(
+      image: src.image,
+      targetLayer: src.targetLayer,
+      sequence: src.sequence,
+      sourceLayer: src.sourceLayer,
+      sourceMaskPath: src.sourceMaskPath == null
+          ? null
+          : (Path()..addPath(src.sourceMaskPath!, Offset.zero)),
+      baseRect: Rect.fromLTWH(
+        src.baseRect.left,
+        src.baseRect.top,
+        src.baseRect.width,
+        src.baseRect.height,
+      ),
+      translation: src.translation,
+      scaleX: src.scaleX,
+      scaleY: src.scaleY,
+      rotation: src.rotation,
+    );
+  }
+
   LassoSelection? _cloneSelection(LassoSelection? src) {
     if (src == null) return null;
     final Path clonedPath = Path()..addPath(src.maskPath, Offset.zero);
@@ -1390,6 +1427,7 @@ class DrawingProvider extends ChangeNotifier {
         src.baseRect.width,
         src.baseRect.height,
       ),
+      imageScale: src.imageScale,
       translation: src.translation,
       scaleX: src.scaleX,
       scaleY: src.scaleY,
@@ -1434,6 +1472,7 @@ class DrawingProvider extends ChangeNotifier {
       color: color,
       width: activeStrokeWidth,
       tool: _tool,
+      sequence: _takeNextSequence(),
       variableWidth: variableWidth,
       isEraser: isEraserStroke,
       eraserAlpha: eraserAlpha,
@@ -1587,6 +1626,7 @@ class DrawingProvider extends ChangeNotifier {
       color: Colors.black,
       width: _strokeWidth,
       tool: fill ? ToolType.fillRect : ToolType.rect,
+      sequence: _takeNextSequence(),
       variableWidth: false,
       isEraser: false,
       isFinished: true,
@@ -1601,6 +1641,7 @@ class DrawingProvider extends ChangeNotifier {
       color: Colors.black,
       width: _strokeWidth,
       tool: fill ? ToolType.fillCircle : ToolType.circle,
+      sequence: _takeNextSequence(),
       variableWidth: false,
       isEraser: false,
       isFinished: true,
@@ -1615,6 +1656,7 @@ class DrawingProvider extends ChangeNotifier {
       color: Colors.black,
       width: _strokeWidth,
       tool: ToolType.line,
+      sequence: _takeNextSequence(),
       variableWidth: false,
       isEraser: false,
       isFinished: true,
@@ -1638,6 +1680,7 @@ class DrawingProvider extends ChangeNotifier {
       color: Colors.black,
       width: _strokeWidth,
       tool: ToolType.dot30, // density encoded in points; tool not critical
+      sequence: _takeNextSequence(),
       variableWidth: false,
       isEraser: false,
       isFinished: true,
@@ -1691,6 +1734,7 @@ class DrawingProvider extends ChangeNotifier {
       maskPath: path,
       layer: layer,
       baseRect: bounds,
+      imageScale: _selectionImageScale(),
     );
     _selectionMasksSource = true;
     _selectionHandlesFilled = false;
@@ -1704,54 +1748,59 @@ class DrawingProvider extends ChangeNotifier {
     Path path,
     Rect bounds,
   ) async {
-    const double sampleScale = _lassoSelectionSuperSample;
+    final double sampleScale = _selectionImageScale();
     final int sampledWidth = math.max(
       1,
-      (bounds.width * sampleScale).ceil(),
+      (canvasSize.width * sampleScale).ceil(),
     );
     final int sampledHeight = math.max(
       1,
-      (bounds.height * sampleScale).ceil(),
+      (canvasSize.height * sampleScale).ceil(),
     );
 
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+    canvas.save();
     canvas.scale(sampleScale, sampleScale);
-    canvas.translate(-bounds.left, -bounds.top);
-    canvas.clipPath(path);
-    // クリップ内を透明でクリアし、元画像を維持（二値化を防ぐ）。FilterQuality.low で輪郭をぼやかさない
-    canvas.drawColor(Colors.transparent, BlendMode.clear);
-    final layerBaseImage = _getLayerBaseImage(layer);
-    if (layerBaseImage != null) {
-      canvas.drawImage(
-        layerBaseImage,
-        Offset.zero,
-        Paint()
-          ..filterQuality = FilterQuality.none
-          ..isAntiAlias = false,
-      );
-    }
-    _drawLines(canvas, canvasSize, layer: layer);
+    canvas.clipPath(path, doAntiAlias: false);
+    // Render in canvas coordinates first, then crop, to preserve tone pixels.
+    _paintLayerSourceContents(canvas, layer);
+    canvas.restore();
     final picture = recorder.endRecording();
 
-    final ui.Image sampled = await picture.toImage(sampledWidth, sampledHeight);
-    if (sampleScale == 1.0) {
-      return sampled;
-    }
+    final ui.Image maskedLayer = await picture.toImage(
+      sampledWidth,
+      sampledHeight,
+    );
 
-    final downsampleRecorder = ui.PictureRecorder();
-    final downsampleCanvas = Canvas(downsampleRecorder);
-    downsampleCanvas.drawColor(Colors.transparent, BlendMode.src);
-    downsampleCanvas.drawImageRect(
-      sampled,
-      Rect.fromLTWH(0, 0, sampled.width.toDouble(), sampled.height.toDouble()),
-      Rect.fromLTWH(0, 0, bounds.width, bounds.height),
+    final cropRecorder = ui.PictureRecorder();
+    final cropCanvas = Canvas(cropRecorder);
+    cropCanvas.drawColor(Colors.transparent, BlendMode.src);
+    final Rect sampledBounds = Rect.fromLTWH(
+      bounds.left * sampleScale,
+      bounds.top * sampleScale,
+      bounds.width * sampleScale,
+      bounds.height * sampleScale,
+    );
+    cropCanvas.drawImageRect(
+      maskedLayer,
+      sampledBounds,
+      Rect.fromLTWH(
+        0,
+        0,
+        sampledBounds.width,
+        sampledBounds.height,
+      ),
       Paint()
         ..isAntiAlias = false
         ..filterQuality = FilterQuality.none,
     );
-    final downsamplePicture = downsampleRecorder.endRecording();
-    return downsamplePicture.toImage(bounds.width.ceil(), bounds.height.ceil());
+    final cropPicture = cropRecorder.endRecording();
+    return cropPicture.toImage(
+      math.max(1, sampledBounds.width.ceil()),
+      math.max(1, sampledBounds.height.ceil()),
+    );
   }
 
   Future<void> cutSelectionToClipboard() async {
@@ -1759,6 +1808,7 @@ class DrawingProvider extends ChangeNotifier {
     _saveState();
     final LassoSelection selection = _selection!;
     _clipboardImage = selection.image;
+    _clipboardImageScale = selection.imageScale;
 
     final ui.Image cutLayer = await _renderLayerWithClearedSelection(
       _canvasSize,
@@ -1775,6 +1825,7 @@ class DrawingProvider extends ChangeNotifier {
     if (_selection != null) {
       _saveState();
       _clipboardImage = _selection!.image;
+      _clipboardImageScale = _selection!.imageScale;
       _selectionMasksSource = false;
       _selectionHandlesFilled = true;
       _selectionMergeToActiveLayer = true;
@@ -1785,19 +1836,21 @@ class DrawingProvider extends ChangeNotifier {
     if (_clipboardImage == null) return;
     _saveState();
     final ui.Image image = _clipboardImage!;
+    final double imageScale = _clipboardImageScale;
     final Size canvasSize =
         _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
     final Rect baseRect = Rect.fromLTWH(
-      (canvasSize.width - image.width.toDouble()) / 2,
-      (canvasSize.height - image.height.toDouble()) / 2,
-      image.width.toDouble(),
-      image.height.toDouble(),
+      (canvasSize.width - (image.width / imageScale)) / 2,
+      (canvasSize.height - (image.height / imageScale)) / 2,
+      image.width / imageScale,
+      image.height / imageScale,
     );
     _selection = LassoSelection(
       image: image,
       maskPath: Path()..addRect(baseRect),
       layer: _activeLayer,
       baseRect: baseRect,
+      imageScale: imageScale,
     );
     _selectionMasksSource = false;
     _selectionHandlesFilled = true;
@@ -2191,11 +2244,7 @@ class DrawingProvider extends ChangeNotifier {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
-    final layerBaseImage = _getLayerBaseImage(layer);
-    if (layerBaseImage != null) {
-      canvas.drawImage(layerBaseImage, Offset.zero, Paint());
-    }
-    _drawLines(canvas, size, layer: layer);
+    _paintLayerSourceContents(canvas, layer);
     _clearSelectionArea(canvas, selection);
     final picture = recorder.endRecording();
     return picture.toImage(size.width.ceil(), size.height.ceil());
@@ -2331,43 +2380,29 @@ class DrawingProvider extends ChangeNotifier {
         _selectionMergeToActiveLayer ? _activeLayer : selection.layer;
     final bool clearSelectionArea =
         _selectionMasksSource && selection.layer == layer;
-    final ui.Image merged = await _renderLayerWithSelection(
-      _canvasSize,
-      layer,
-      selection: selection,
-      clearSelectionArea: clearSelectionArea,
+    _placements.add(
+      LayerPlacement(
+        image: selection.image,
+        targetLayer: layer,
+        sequence: _takeNextSequence(),
+        sourceLayer: clearSelectionArea ? selection.layer : null,
+        sourceMaskPath: clearSelectionArea
+            ? (Path()..addPath(selection.maskPath, Offset.zero))
+            : null,
+        baseRect: Rect.fromLTWH(
+          selection.baseRect.left,
+          selection.baseRect.top,
+          selection.baseRect.width,
+          selection.baseRect.height,
+        ),
+        translation: selection.translation,
+        scaleX: selection.scaleX,
+        scaleY: selection.scaleY,
+        rotation: selection.rotation,
+      ),
     );
-    _setLayerBaseImage(layer, merged);
-    _clearLayerLines(layer);
     _resetSelectionState();
     notifyListeners();
-  }
-
-  Future<ui.Image> _renderLayerWithSelection(
-    Size size,
-    DrawingLayer layer, {
-    required LassoSelection selection,
-    required bool clearSelectionArea,
-  }) async {
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawColor(Colors.transparent, BlendMode.src);
-    final layerBaseImage = _getLayerBaseImage(layer);
-    if (layerBaseImage != null) {
-      canvas.drawImage(layerBaseImage, Offset.zero, Paint());
-    }
-    _drawLines(canvas, size, layer: layer);
-    if (clearSelectionArea) {
-      _clearSelectionArea(canvas, selection);
-    }
-    _paintSelection(
-      canvas,
-      selection,
-      canvasSize: size,
-      renderFromSource: _selectionMasksSource,
-    );
-    final picture = recorder.endRecording();
-    return picture.toImage(size.width.ceil(), size.height.ceil());
   }
 
   // Painting helpers shared with CustomPainter and off-screen rendering
@@ -2384,91 +2419,162 @@ class DrawingProvider extends ChangeNotifier {
     }
   }
 
-  void _drawLines(Canvas canvas, Size size, {DrawingLayer? layer}) {
+  void _paintLayerSourceContents(
+    Canvas canvas,
+    DrawingLayer layer,
+  ) {
+    final ui.Image? layerBaseImage = _getLayerBaseImage(layer);
+    if (layerBaseImage != null) {
+      canvas.drawImage(
+        layerBaseImage,
+        Offset.zero,
+        Paint()
+          ..isAntiAlias = false
+          ..filterQuality = FilterQuality.none,
+      );
+    }
+
+    final List<DrawnLine> layerLines = _lines
+        .where((DrawnLine line) => line.layer == layer)
+        .toList(growable: false);
+    final List<LayerPlacement> layerPlacements = _placements
+        .where((LayerPlacement placement) =>
+            placement.sourceLayer == layer || placement.targetLayer == layer)
+        .toList(growable: false);
+
+    int lineIndex = 0;
+    int placementIndex = 0;
+    while (lineIndex < layerLines.length ||
+        placementIndex < layerPlacements.length) {
+      final DrawnLine? nextLine =
+          lineIndex < layerLines.length ? layerLines[lineIndex] : null;
+      final LayerPlacement? nextPlacement =
+          placementIndex < layerPlacements.length
+              ? layerPlacements[placementIndex]
+              : null;
+
+      if (nextPlacement == null ||
+          (nextLine != null && nextLine.sequence < nextPlacement.sequence)) {
+        _paintLine(canvas, nextLine!);
+        lineIndex++;
+        continue;
+      }
+
+      if (nextPlacement.sourceLayer == layer &&
+          nextPlacement.sourceMaskPath != null) {
+        canvas.drawPath(
+          nextPlacement.sourceMaskPath!,
+          Paint()
+            ..blendMode = BlendMode.clear
+            ..isAntiAlias = false,
+        );
+      }
+      if (nextPlacement.targetLayer == layer) {
+        _paintLayerPlacement(canvas, nextPlacement);
+      }
+      placementIndex++;
+    }
+  }
+
+  void _paintLayerPlacement(Canvas canvas, LayerPlacement placement) {
+    final Rect rect = placement.baseRect;
+    final Offset center = rect.center + placement.translation;
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(placement.rotation);
+    canvas.scale(placement.scaleX, placement.scaleY);
+    canvas.translate(-rect.center.dx, -rect.center.dy);
+    paintImage(
+      canvas: canvas,
+      rect: rect,
+      image: placement.image,
+      fit: BoxFit.fill,
+      filterQuality: FilterQuality.none,
+    );
+    canvas.restore();
+  }
+
+  void _paintLine(Canvas canvas, DrawnLine line) {
     final paint = Paint()
       ..isAntiAlias = true
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
+    final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
+    final bool isToneStroke = toneShader != null;
+    paint
+      ..isAntiAlias = !isToneStroke
+      ..shader = toneShader
+      ..color = (toneShader == null ? line.color : Colors.white)
+          .withValues(alpha: line.eraserAlpha)
+      ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..filterQuality =
+          toneShader == null ? FilterQuality.low : FilterQuality.none;
 
-    for (final line in _lines) {
-      if (layer != null && line.layer != layer) continue;
-      final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
-      final bool isToneStroke = toneShader != null;
-      paint
-        ..isAntiAlias = !isToneStroke
-        ..shader = toneShader
-        ..color = (toneShader == null ? line.color : Colors.white)
-            .withValues(alpha: line.eraserAlpha)
-        ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..filterQuality =
-            toneShader == null ? FilterQuality.low : FilterQuality.none;
-
-      switch (line.tool) {
-        case ToolType.rect:
-        case ToolType.fillRect:
-          if (line.shapeRect == null) continue;
+    switch (line.tool) {
+      case ToolType.rect:
+      case ToolType.fillRect:
+        if (line.shapeRect == null) return;
+        paint
+          ..style = line.tool == ToolType.fillRect
+              ? PaintingStyle.fill
+              : PaintingStyle.stroke
+          ..strokeCap = StrokeCap.butt
+          ..strokeJoin = StrokeJoin.miter
+          ..strokeWidth = line.width;
+        canvas.drawRect(line.shapeRect!, paint);
+        return;
+      case ToolType.circle:
+      case ToolType.fillCircle:
+        if (line.shapeRect == null) return;
+        paint
+          ..style = line.tool == ToolType.fillCircle
+              ? PaintingStyle.fill
+              : PaintingStyle.stroke
+          ..strokeWidth = line.width;
+        canvas.drawOval(line.shapeRect!, paint);
+        return;
+      case ToolType.line:
+        if (line.points.length < 2) return;
+        paint
+          ..strokeWidth = line.points.first.width
+          ..strokeCap = StrokeCap.butt
+          ..strokeJoin = StrokeJoin.miter;
+        final path = Path()
+          ..moveTo(line.points.first.offset.dx, line.points.first.offset.dy)
+          ..lineTo(line.points.last.offset.dx, line.points.last.offset.dy);
+        canvas.drawPath(path, paint);
+        return;
+      case ToolType.dot30:
+      case ToolType.dot60:
+      case ToolType.dot80:
+        if (line.points.isEmpty) return;
+        paint
+          ..style = PaintingStyle.fill
+          ..strokeWidth = 1;
+        for (final p in line.points) {
+          canvas.drawCircle(p.offset, line.width / 2, paint);
+        }
+        return;
+      default:
+        if (line.points.length < 2) return;
+        if (!line.variableWidth) {
+          final path = _buildSmoothPath(line.points);
           paint
-            ..style = line.tool == ToolType.fillRect
-                ? PaintingStyle.fill
-                : PaintingStyle.stroke
-            ..strokeCap = StrokeCap.butt
-            ..strokeJoin = StrokeJoin.miter
+            ..style = PaintingStyle.stroke
             ..strokeWidth = line.width;
-          canvas.drawRect(line.shapeRect!, paint);
-          break;
-        case ToolType.circle:
-        case ToolType.fillCircle:
-          if (line.shapeRect == null) continue;
-          paint
-            ..style = line.tool == ToolType.fillCircle
-                ? PaintingStyle.fill
-                : PaintingStyle.stroke
-            ..strokeWidth = line.width;
-          canvas.drawOval(line.shapeRect!, paint);
-          break;
-        case ToolType.line:
-          if (line.points.length < 2) continue;
-          paint
-            ..strokeWidth = line.points.first.width
-            ..strokeCap = StrokeCap.butt
-            ..strokeJoin = StrokeJoin.miter;
-          final path = Path()
-            ..moveTo(line.points.first.offset.dx, line.points.first.offset.dy)
-            ..lineTo(line.points.last.offset.dx, line.points.last.offset.dy);
           canvas.drawPath(path, paint);
-          break;
-        case ToolType.dot30:
-        case ToolType.dot60:
-        case ToolType.dot80:
-          if (line.points.isEmpty) continue;
-          paint
-            ..style = PaintingStyle.fill
-            ..strokeWidth = 1;
-          for (final p in line.points) {
-            canvas.drawCircle(p.offset, line.width / 2, paint);
-          }
-          break;
-        default:
-          if (line.points.length < 2) continue;
-          if (!line.variableWidth) {
-            final path = _buildSmoothPath(line.points);
-            paint
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = line.width;
-            canvas.drawPath(path, paint);
-          } else {
-            final path = _buildVariableWidthRibbon(line.points);
-            paint
-              ..style = PaintingStyle.fill
-              ..strokeWidth = 1
-              ..strokeCap = StrokeCap.round
-              ..strokeJoin = StrokeJoin.round;
-            canvas.drawPath(path, paint);
-          }
-      }
+          return;
+        }
+        final path = _buildVariableWidthRibbon(line.points);
+        paint
+          ..style = PaintingStyle.fill
+          ..strokeWidth = 1
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round;
+        canvas.drawPath(path, paint);
     }
   }
 
@@ -2591,10 +2697,8 @@ class DrawingProvider extends ChangeNotifier {
 
   void _paintSelection(
     Canvas canvas,
-    LassoSelection selection, {
-    required Size canvasSize,
-    required bool renderFromSource,
-  }) {
+    LassoSelection selection,
+  ) {
     final Rect rect = selection.baseRect;
     final Offset center = rect.center + selection.translation;
     canvas.save();
@@ -2602,30 +2706,13 @@ class DrawingProvider extends ChangeNotifier {
     canvas.rotate(selection.rotation);
     canvas.scale(selection.scaleX, selection.scaleY);
     canvas.translate(-rect.center.dx, -rect.center.dy);
-    if (renderFromSource) {
-      canvas.save();
-      canvas.clipPath(selection.maskPath, doAntiAlias: false);
-      final ui.Image? layerBaseImage = _getLayerBaseImage(selection.layer);
-      if (layerBaseImage != null) {
-        canvas.drawImage(
-          layerBaseImage,
-          Offset.zero,
-          Paint()
-            ..isAntiAlias = false
-            ..filterQuality = FilterQuality.none,
-        );
-      }
-      _drawLines(canvas, canvasSize, layer: selection.layer);
-      canvas.restore();
-    } else {
-      paintImage(
-        canvas: canvas,
-        rect: rect,
-        image: selection.image,
-        fit: BoxFit.fill,
-        filterQuality: FilterQuality.none,
-      );
-    }
+    paintImage(
+      canvas: canvas,
+      rect: rect,
+      image: selection.image,
+      fit: BoxFit.fill,
+      filterQuality: FilterQuality.none,
+    );
     canvas.restore();
   }
 

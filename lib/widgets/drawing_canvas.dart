@@ -94,6 +94,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       tone30Shader: drawing.tone30Shader,
                       tone60Shader: drawing.tone60Shader,
                       tone80Shader: drawing.tone80Shader,
+                      placements: drawing.placements,
                       selection: drawing.selection,
                       selectionMasksSource: drawing.selectionMasksSource,
                       selectionHandlesFilled: drawing.selectionHandlesFilled,
@@ -721,6 +722,7 @@ class DrawingPainter extends CustomPainter {
   final ui.ImageShader? tone30Shader;
   final ui.ImageShader? tone60Shader;
   final ui.ImageShader? tone80Shader;
+  final List<LayerPlacement> placements;
   final LassoSelection? selection;
   final bool selectionMasksSource;
   final bool selectionHandlesFilled;
@@ -749,6 +751,7 @@ class DrawingPainter extends CustomPainter {
     required this.tone30Shader,
     required this.tone60Shader,
     required this.tone80Shader,
+    required this.placements,
     required this.selection,
     required this.selectionMasksSource,
     required this.selectionHandlesFilled,
@@ -789,8 +792,8 @@ class DrawingPainter extends CustomPainter {
     _drawLayer(
       canvas,
       canvasSize,
+      DrawingLayer.layerA,
       layerABaseImage,
-      layerALines,
       isVisible: isLayerAVisible,
       opacity: layerAOpacity,
       holePath: layerAHolePath,
@@ -798,8 +801,8 @@ class DrawingPainter extends CustomPainter {
     _drawLayer(
       canvas,
       canvasSize,
+      DrawingLayer.layerB,
       layerBBaseImage,
-      layerBLines,
       isVisible: isLayerBVisible,
       opacity: layerBOpacity,
       holePath: layerBHolePath,
@@ -807,8 +810,8 @@ class DrawingPainter extends CustomPainter {
     _drawLayer(
       canvas,
       canvasSize,
+      DrawingLayer.layerC,
       layerCBaseImage,
-      layerCLines,
       isVisible: isLayerCVisible,
       opacity: layerCOpacity,
       holePath: layerCHolePath,
@@ -833,7 +836,6 @@ class DrawingPainter extends CustomPainter {
         _paintSelection(
           canvas,
           selection!,
-          renderFromSource: selectionMasksSource,
         );
         canvas.restore();
         _paintSelectionOverlay(canvas, selection!, handles);
@@ -851,8 +853,8 @@ class DrawingPainter extends CustomPainter {
   void _drawLayer(
     Canvas canvas,
     Size size,
-    ui.Image? baseImage,
-    List<DrawnLine> lines, {
+    DrawingLayer layer,
+    ui.Image? baseImage, {
     required bool isVisible,
     required double opacity,
     Path? holePath,
@@ -872,7 +874,7 @@ class DrawingPainter extends CustomPainter {
           ..filterQuality = FilterQuality.none,
       );
     }
-    _drawLines(canvas, lines);
+    _paintCommittedPlacementsForLayer(canvas, layer);
     if (holePath != null) {
       canvas.drawPath(
         holePath,
@@ -884,89 +886,64 @@ class DrawingPainter extends CustomPainter {
     canvas.restore();
   }
 
-  void _drawLines(Canvas canvas, List<DrawnLine> lines) {
-    final paint = Paint()
-      ..isAntiAlias = true
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    for (final line in lines) {
-      final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
-      final bool isToneStroke = toneShader != null;
-      paint
-        ..isAntiAlias = !isToneStroke
-        ..shader = toneShader
-        ..color = (toneShader == null ? line.color : Colors.white)
-            .withValues(alpha: line.eraserAlpha)
-        ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
-        ..filterQuality =
-            toneShader == null ? FilterQuality.low : FilterQuality.none;
-
-      switch (line.tool) {
-        case ToolType.rect:
-        case ToolType.fillRect:
-          if (line.shapeRect == null) continue;
-          paint
-            ..style = line.tool == ToolType.fillRect
-                ? PaintingStyle.fill
-                : PaintingStyle.stroke
-            ..strokeCap = StrokeCap.butt
-            ..strokeJoin = StrokeJoin.miter
-            ..strokeWidth = line.width;
-          canvas.drawRect(line.shapeRect!, paint);
-          break;
-        case ToolType.circle:
-        case ToolType.fillCircle:
-          if (line.shapeRect == null) continue;
-          paint
-            ..style = line.tool == ToolType.fillCircle
-                ? PaintingStyle.fill
-                : PaintingStyle.stroke
-            ..strokeWidth = line.width;
-          canvas.drawOval(line.shapeRect!, paint);
-          break;
-        case ToolType.line:
-          if (line.points.length < 2) continue;
-          paint
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = line.points.first.width
-            ..strokeCap = StrokeCap.butt
-            ..strokeJoin = StrokeJoin.miter;
-          final path = Path()
-            ..moveTo(line.points.first.offset.dx, line.points.first.offset.dy)
-            ..lineTo(line.points.last.offset.dx, line.points.last.offset.dy);
-          canvas.drawPath(path, paint);
-          break;
-        case ToolType.dot30:
-        case ToolType.dot60:
-        case ToolType.dot80:
-          if (line.points.isEmpty) continue;
-          paint
-            ..style = PaintingStyle.fill
-            ..strokeWidth = 1;
-          for (final p in line.points) {
-            canvas.drawCircle(p.offset, line.width / 2, paint);
-          }
-          break;
-        default:
-          if (line.points.length < 2) continue;
-          if (!line.variableWidth) {
-            final path = _buildSmoothPath(line.points);
-            paint
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = line.width;
-            canvas.drawPath(path, paint);
-          } else {
-            final path = _buildVariableWidthRibbon(line.points);
-            paint
-              ..style = PaintingStyle.fill
-              ..strokeWidth = 1
-              ..strokeCap = StrokeCap.round
-              ..strokeJoin = StrokeJoin.round;
-            canvas.drawPath(path, paint);
-          }
+  void _paintCommittedPlacementsForLayer(Canvas canvas, DrawingLayer layer) {
+    final List<DrawnLine> lines = switch (layer) {
+      DrawingLayer.layerA => layerALines,
+      DrawingLayer.layerB => layerBLines,
+      DrawingLayer.layerC => layerCLines,
+    };
+    final List<LayerPlacement> layerPlacements = placements
+        .where((LayerPlacement placement) =>
+            placement.sourceLayer == layer || placement.targetLayer == layer)
+        .toList(growable: false);
+    int lineIndex = 0;
+    int placementIndex = 0;
+    while (
+        lineIndex < lines.length || placementIndex < layerPlacements.length) {
+      final DrawnLine? nextLine =
+          lineIndex < lines.length ? lines[lineIndex] : null;
+      final LayerPlacement? nextPlacement =
+          placementIndex < layerPlacements.length
+              ? layerPlacements[placementIndex]
+              : null;
+      if (nextPlacement == null ||
+          (nextLine != null && nextLine.sequence < nextPlacement.sequence)) {
+        _paintLine(canvas, nextLine!);
+        lineIndex++;
+        continue;
       }
+      if (nextPlacement.sourceLayer == layer &&
+          nextPlacement.sourceMaskPath != null) {
+        canvas.drawPath(
+          nextPlacement.sourceMaskPath!,
+          Paint()
+            ..blendMode = BlendMode.clear
+            ..isAntiAlias = false,
+        );
+      }
+      if (nextPlacement.targetLayer == layer) {
+        _paintLayerPlacement(canvas, nextPlacement);
+      }
+      placementIndex++;
     }
+  }
+
+  void _paintLayerPlacement(Canvas canvas, LayerPlacement placement) {
+    final Rect rect = placement.baseRect;
+    final Offset center = rect.center + placement.translation;
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(placement.rotation);
+    canvas.scale(placement.scaleX, placement.scaleY);
+    canvas.translate(-rect.center.dx, -rect.center.dy);
+    paintImage(
+      canvas: canvas,
+      rect: rect,
+      image: placement.image,
+      fit: BoxFit.fill,
+      filterQuality: FilterQuality.none,
+    );
+    canvas.restore();
   }
 
   ui.ImageShader? _toneShaderForTool(ToolType tool) {
@@ -984,9 +961,8 @@ class DrawingPainter extends CustomPainter {
 
   void _paintSelection(
     Canvas canvas,
-    LassoSelection selection, {
-    required bool renderFromSource,
-  }) {
+    LassoSelection selection,
+  ) {
     final Rect rect = selection.baseRect;
     final Offset center = rect.center + selection.translation;
     canvas.save();
@@ -994,44 +970,96 @@ class DrawingPainter extends CustomPainter {
     canvas.rotate(selection.rotation);
     canvas.scale(selection.scaleX, selection.scaleY);
     canvas.translate(-rect.center.dx, -rect.center.dy);
-    if (renderFromSource) {
-      canvas.save();
-      canvas.clipPath(selection.maskPath, doAntiAlias: false);
-      _paintSelectionSourceLayer(canvas, selection.layer);
-      canvas.restore();
-    } else {
-      paintImage(
-        canvas: canvas,
-        rect: rect,
-        image: selection.image,
-        fit: BoxFit.fill,
-        filterQuality: FilterQuality.none,
-      );
-    }
+    paintImage(
+      canvas: canvas,
+      rect: rect,
+      image: selection.image,
+      fit: BoxFit.fill,
+      filterQuality: FilterQuality.none,
+    );
     canvas.restore();
   }
 
-  void _paintSelectionSourceLayer(Canvas canvas, DrawingLayer layer) {
-    final ui.Image? baseImage = switch (layer) {
-      DrawingLayer.layerA => layerABaseImage,
-      DrawingLayer.layerB => layerBBaseImage,
-      DrawingLayer.layerC => layerCBaseImage,
-    };
-    final List<DrawnLine> lines = switch (layer) {
-      DrawingLayer.layerA => layerALines,
-      DrawingLayer.layerB => layerBLines,
-      DrawingLayer.layerC => layerCLines,
-    };
-    if (baseImage != null) {
-      canvas.drawImage(
-        baseImage,
-        Offset.zero,
-        Paint()
-          ..isAntiAlias = false
-          ..filterQuality = FilterQuality.none,
-      );
+  void _paintLine(Canvas canvas, DrawnLine line) {
+    final paint = Paint()
+      ..isAntiAlias = true
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
+    final bool isToneStroke = toneShader != null;
+    paint
+      ..isAntiAlias = !isToneStroke
+      ..shader = toneShader
+      ..color = (toneShader == null ? line.color : Colors.white)
+          .withValues(alpha: line.eraserAlpha)
+      ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
+      ..filterQuality =
+          toneShader == null ? FilterQuality.low : FilterQuality.none;
+
+    switch (line.tool) {
+      case ToolType.rect:
+      case ToolType.fillRect:
+        if (line.shapeRect == null) return;
+        paint
+          ..style = line.tool == ToolType.fillRect
+              ? PaintingStyle.fill
+              : PaintingStyle.stroke
+          ..strokeCap = StrokeCap.butt
+          ..strokeJoin = StrokeJoin.miter
+          ..strokeWidth = line.width;
+        canvas.drawRect(line.shapeRect!, paint);
+        return;
+      case ToolType.circle:
+      case ToolType.fillCircle:
+        if (line.shapeRect == null) return;
+        paint
+          ..style = line.tool == ToolType.fillCircle
+              ? PaintingStyle.fill
+              : PaintingStyle.stroke
+          ..strokeWidth = line.width;
+        canvas.drawOval(line.shapeRect!, paint);
+        return;
+      case ToolType.line:
+        if (line.points.length < 2) return;
+        paint
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = line.points.first.width
+          ..strokeCap = StrokeCap.butt
+          ..strokeJoin = StrokeJoin.miter;
+        final path = Path()
+          ..moveTo(line.points.first.offset.dx, line.points.first.offset.dy)
+          ..lineTo(line.points.last.offset.dx, line.points.last.offset.dy);
+        canvas.drawPath(path, paint);
+        return;
+      case ToolType.dot30:
+      case ToolType.dot60:
+      case ToolType.dot80:
+        if (line.points.isEmpty) return;
+        paint
+          ..style = PaintingStyle.fill
+          ..strokeWidth = 1;
+        for (final p in line.points) {
+          canvas.drawCircle(p.offset, line.width / 2, paint);
+        }
+        return;
+      default:
+        if (line.points.length < 2) return;
+        if (!line.variableWidth) {
+          final path = _buildSmoothPath(line.points);
+          paint
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = line.width;
+          canvas.drawPath(path, paint);
+          return;
+        }
+        final path = _buildVariableWidthRibbon(line.points);
+        paint
+          ..style = PaintingStyle.fill
+          ..strokeWidth = 1
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round;
+        canvas.drawPath(path, paint);
     }
-    _drawLines(canvas, lines);
   }
 
   void _paintSelectionOverlay(
