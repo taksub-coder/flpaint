@@ -124,7 +124,6 @@ class DrawingProvider extends ChangeNotifier {
   bool _selectionHandlesFilled = false;
   bool _selectionMergeToActiveLayer = false;
   ui.Image? _clipboardImage;
-  double _clipboardImageScale = 1.0;
 
   // Shapes
   Offset? _shapeStart;
@@ -1330,13 +1329,6 @@ class DrawingProvider extends ChangeNotifier {
 
   int _takeNextSequence() => _nextSequence++;
 
-  double _selectionImageScale() {
-    return math.max(
-      1.0,
-      ui.PlatformDispatcher.instance.implicitView?.devicePixelRatio ?? 1.0,
-    );
-  }
-
   _DrawingSnapshot _createSnapshot() {
     return _DrawingSnapshot(
       lines: List<DrawnLine>.from(_lines.map(_cloneLine)),
@@ -1427,7 +1419,6 @@ class DrawingProvider extends ChangeNotifier {
         src.baseRect.width,
         src.baseRect.height,
       ),
-      imageScale: src.imageScale,
       translation: src.translation,
       scaleX: src.scaleX,
       scaleY: src.scaleY,
@@ -1734,7 +1725,6 @@ class DrawingProvider extends ChangeNotifier {
       maskPath: path,
       layer: layer,
       baseRect: bounds,
-      imageScale: _selectionImageScale(),
     );
     _selectionMasksSource = true;
     _selectionHandlesFilled = false;
@@ -1748,21 +1738,19 @@ class DrawingProvider extends ChangeNotifier {
     Path path,
     Rect bounds,
   ) async {
-    final double sampleScale = _selectionImageScale();
     final int sampledWidth = math.max(
       1,
-      (canvasSize.width * sampleScale).ceil(),
+      canvasSize.width.ceil(),
     );
     final int sampledHeight = math.max(
       1,
-      (canvasSize.height * sampleScale).ceil(),
+      canvasSize.height.ceil(),
     );
 
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
     canvas.save();
-    canvas.scale(sampleScale, sampleScale);
     canvas.clipPath(path, doAntiAlias: false);
     // Render in canvas coordinates first, then crop, to preserve tone pixels.
     _paintLayerSourceContents(canvas, layer);
@@ -1777,29 +1765,18 @@ class DrawingProvider extends ChangeNotifier {
     final cropRecorder = ui.PictureRecorder();
     final cropCanvas = Canvas(cropRecorder);
     cropCanvas.drawColor(Colors.transparent, BlendMode.src);
-    final Rect sampledBounds = Rect.fromLTWH(
-      bounds.left * sampleScale,
-      bounds.top * sampleScale,
-      bounds.width * sampleScale,
-      bounds.height * sampleScale,
-    );
     cropCanvas.drawImageRect(
       maskedLayer,
-      sampledBounds,
-      Rect.fromLTWH(
-        0,
-        0,
-        sampledBounds.width,
-        sampledBounds.height,
-      ),
+      bounds,
+      Rect.fromLTWH(0, 0, bounds.width, bounds.height),
       Paint()
         ..isAntiAlias = false
         ..filterQuality = FilterQuality.none,
     );
     final cropPicture = cropRecorder.endRecording();
     return cropPicture.toImage(
-      math.max(1, sampledBounds.width.ceil()),
-      math.max(1, sampledBounds.height.ceil()),
+      math.max(1, bounds.width.ceil()),
+      math.max(1, bounds.height.ceil()),
     );
   }
 
@@ -1808,7 +1785,6 @@ class DrawingProvider extends ChangeNotifier {
     _saveState();
     final LassoSelection selection = _selection!;
     _clipboardImage = selection.image;
-    _clipboardImageScale = selection.imageScale;
 
     final ui.Image cutLayer = await _renderLayerWithClearedSelection(
       _canvasSize,
@@ -1825,7 +1801,6 @@ class DrawingProvider extends ChangeNotifier {
     if (_selection != null) {
       _saveState();
       _clipboardImage = _selection!.image;
-      _clipboardImageScale = _selection!.imageScale;
       _selectionMasksSource = false;
       _selectionHandlesFilled = true;
       _selectionMergeToActiveLayer = true;
@@ -1836,21 +1811,19 @@ class DrawingProvider extends ChangeNotifier {
     if (_clipboardImage == null) return;
     _saveState();
     final ui.Image image = _clipboardImage!;
-    final double imageScale = _clipboardImageScale;
     final Size canvasSize =
         _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
     final Rect baseRect = Rect.fromLTWH(
-      (canvasSize.width - (image.width / imageScale)) / 2,
-      (canvasSize.height - (image.height / imageScale)) / 2,
-      image.width / imageScale,
-      image.height / imageScale,
+      (canvasSize.width - image.width.toDouble()) / 2,
+      (canvasSize.height - image.height.toDouble()) / 2,
+      image.width.toDouble(),
+      image.height.toDouble(),
     );
     _selection = LassoSelection(
       image: image,
       maskPath: Path()..addRect(baseRect),
       layer: _activeLayer,
       baseRect: baseRect,
-      imageScale: imageScale,
     );
     _selectionMasksSource = false;
     _selectionHandlesFilled = true;

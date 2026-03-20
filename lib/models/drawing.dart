@@ -77,7 +77,6 @@ class LassoSelection {
   final Image image;
   final Path maskPath;
   final DrawingLayer layer;
-  final double imageScale;
   Rect baseRect;
   Offset translation;
   double scaleX;
@@ -89,7 +88,6 @@ class LassoSelection {
     required this.maskPath,
     required this.layer,
     required this.baseRect,
-    this.imageScale = 1.0,
     this.translation = Offset.zero,
     this.scaleX = 1.0,
     this.scaleY = 1.0,
