@@ -13,6 +13,7 @@ import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/drawing.dart';
+import '../painting/layer_composite_painter.dart';
 
 class _DrawingSnapshot {
   final List<DrawnLine> lines;
@@ -89,6 +90,21 @@ enum _VerticalGlyphKind {
   special,
 }
 
+/// Internal clipboard for vector lasso copy (paths stay lossless until cut rasterizes).
+class _ClipboardVectorSpec {
+  final Path maskPathCanvas;
+  final Rect boundsAtCopy;
+  final DrawingLayer layer;
+  final int maxContentSequence;
+
+  _ClipboardVectorSpec({
+    required Path maskPathSource,
+    required this.boundsAtCopy,
+    required this.layer,
+    required this.maxContentSequence,
+  }) : maskPathCanvas = Path()..addPath(maskPathSource, Offset.zero);
+}
+
 class DrawingProvider extends ChangeNotifier {
   final List<DrawnLine> _lines = [];
   final List<LayerPlacement> _placements = [];
@@ -124,6 +140,7 @@ class DrawingProvider extends ChangeNotifier {
   bool _selectionHandlesFilled = false;
   bool _selectionMergeToActiveLayer = false;
   ui.Image? _clipboardImage;
+  _ClipboardVectorSpec? _clipboardVector;
 
   // Shapes
   Offset? _shapeStart;
@@ -1386,7 +1403,12 @@ class DrawingProvider extends ChangeNotifier {
 
   LayerPlacement _clonePlacement(LayerPlacement src) {
     return LayerPlacement(
-      image: src.image,
+      rasterImage: src.rasterImage,
+      vectorSourceLayer: src.vectorSourceLayer,
+      vectorMaskPath: src.vectorMaskPath == null
+          ? null
+          : (Path()..addPath(src.vectorMaskPath!, Offset.zero)),
+      vectorMaxSequence: src.vectorMaxSequence,
       targetLayer: src.targetLayer,
       sequence: src.sequence,
       sourceLayer: src.sourceLayer,
@@ -1410,7 +1432,8 @@ class DrawingProvider extends ChangeNotifier {
     if (src == null) return null;
     final Path clonedPath = Path()..addPath(src.maskPath, Offset.zero);
     return LassoSelection(
-      image: src.image,
+      rasterImage: src.rasterImage,
+      maxContentSequence: src.maxContentSequence,
       maskPath: clonedPath,
       layer: src.layer,
       baseRect: Rect.fromLTWH(
@@ -1679,6 +1702,27 @@ class DrawingProvider extends ChangeNotifier {
     ));
   }
 
+  int _maxLayerContentSequence(DrawingLayer layer) {
+    int maxSeq = 0;
+    for (final DrawnLine line in _lines) {
+      if (line.layer == layer) {
+        maxSeq = math.max(maxSeq, line.sequence);
+      }
+    }
+    for (final LayerPlacement p in _placements) {
+      if (p.sourceLayer == layer || p.targetLayer == layer) {
+        maxSeq = math.max(maxSeq, p.sequence);
+      }
+    }
+    return maxSeq;
+  }
+
+  Path _pathTranslatedBy(Path source, Offset delta) {
+    final Path p = Path()..addPath(source, Offset.zero);
+    p.transform(Matrix4.translationValues(delta.dx, delta.dy, 0).storage);
+    return p;
+  }
+
   // Lasso creation
   void startLasso(Offset start) {
     _isDrawingLasso = true;
@@ -1694,7 +1738,7 @@ class DrawingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> finishLasso(Size size) async {
+  void finishLasso(Size size) {
     if (!_isDrawingLasso || _lassoPoints.length < 3) {
       _lassoPoints.clear();
       _isDrawingLasso = false;
@@ -1714,14 +1758,10 @@ class DrawingProvider extends ChangeNotifier {
     }
 
     final DrawingLayer layer = _activeLayer;
-    final ui.Image selectionImage = await _extractSelection(
-      size,
-      layer,
-      path,
-      bounds,
-    );
+    final int maxSeq = _maxLayerContentSequence(layer);
     _selection = LassoSelection(
-      image: selectionImage,
+      rasterImage: null,
+      maxContentSequence: maxSeq,
       maskPath: path,
       layer: layer,
       baseRect: bounds,
@@ -1732,12 +1772,14 @@ class DrawingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ui.Image> _extractSelection(
+  /// Rasterize vector selection once (e.g. cut → clipboard) while strokes still exist.
+  Future<ui.Image> _rasterizeVectorSelectionToImage(
+    LassoSelection selection,
     Size canvasSize,
-    DrawingLayer layer,
-    Path path,
-    Rect bounds,
   ) async {
+    final DrawingLayer layer = selection.layer;
+    final Path path = Path()..addPath(selection.maskPath, Offset.zero);
+    final Rect bounds = selection.baseRect;
     final int sampledWidth = math.max(
       1,
       canvasSize.width.ceil(),
@@ -1784,7 +1826,14 @@ class DrawingProvider extends ChangeNotifier {
     if (_selection == null || _canvasSize == Size.zero) return;
     _saveState();
     final LassoSelection selection = _selection!;
-    _clipboardImage = selection.image;
+    if (selection.rasterImage != null) {
+      _clipboardImage = selection.rasterImage;
+      _clipboardVector = null;
+    } else {
+      _clipboardImage =
+          await _rasterizeVectorSelectionToImage(selection, _canvasSize);
+      _clipboardVector = null;
+    }
 
     final ui.Image cutLayer = await _renderLayerWithClearedSelection(
       _canvasSize,
@@ -1800,10 +1849,55 @@ class DrawingProvider extends ChangeNotifier {
   Future<void> copyPasteSelection() async {
     if (_selection != null) {
       _saveState();
-      _clipboardImage = _selection!.image;
+      final LassoSelection s = _selection!;
+      if (s.rasterImage != null) {
+        _clipboardImage = s.rasterImage;
+        _clipboardVector = null;
+      } else {
+        _clipboardImage = null;
+        _clipboardVector = _ClipboardVectorSpec(
+          maskPathSource: s.maskPath,
+          boundsAtCopy: Rect.fromLTWH(
+            s.baseRect.left,
+            s.baseRect.top,
+            s.baseRect.width,
+            s.baseRect.height,
+          ),
+          layer: s.layer,
+          maxContentSequence: s.maxContentSequence,
+        );
+      }
       _selectionMasksSource = false;
       _selectionHandlesFilled = true;
       _selectionMergeToActiveLayer = true;
+      notifyListeners();
+      return;
+    }
+
+    if (_clipboardVector != null) {
+      final _ClipboardVectorSpec v = _clipboardVector!;
+      final Size canvasSize =
+          _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+      final Rect newBaseRect = Rect.fromLTWH(
+        (canvasSize.width - v.boundsAtCopy.width) / 2,
+        (canvasSize.height - v.boundsAtCopy.height) / 2,
+        v.boundsAtCopy.width,
+        v.boundsAtCopy.height,
+      );
+      final Offset delta = newBaseRect.topLeft - v.boundsAtCopy.topLeft;
+      final Path newMask = _pathTranslatedBy(v.maskPathCanvas, delta);
+      _saveState();
+      _selection = LassoSelection(
+        rasterImage: null,
+        maxContentSequence: v.maxContentSequence,
+        maskPath: newMask,
+        layer: v.layer,
+        baseRect: newBaseRect,
+      );
+      _selectionMasksSource = false;
+      _selectionHandlesFilled = true;
+      _selectionMergeToActiveLayer = true;
+      _tool = ToolType.lasso;
       notifyListeners();
       return;
     }
@@ -1820,7 +1914,8 @@ class DrawingProvider extends ChangeNotifier {
       image.height.toDouble(),
     );
     _selection = LassoSelection(
-      image: image,
+      rasterImage: image,
+      maxContentSequence: 0,
       maskPath: Path()..addRect(baseRect),
       layer: _activeLayer,
       baseRect: baseRect,
@@ -1865,7 +1960,8 @@ class DrawingProvider extends ChangeNotifier {
       textImage.height.toDouble(),
     );
     _selection = LassoSelection(
-      image: textImage,
+      rasterImage: textImage,
+      maxContentSequence: 0,
       maskPath: Path()..addRect(baseRect),
       layer: _activeLayer,
       baseRect: baseRect,
@@ -2355,7 +2451,15 @@ class DrawingProvider extends ChangeNotifier {
         _selectionMasksSource && selection.layer == layer;
     _placements.add(
       LayerPlacement(
-        image: selection.image,
+        rasterImage: selection.rasterImage,
+        vectorSourceLayer:
+            selection.rasterImage == null ? selection.layer : null,
+        vectorMaskPath: selection.rasterImage == null
+            ? (Path()..addPath(selection.maskPath, Offset.zero))
+            : null,
+        vectorMaxSequence: selection.rasterImage == null
+            ? selection.maxContentSequence
+            : null,
         targetLayer: layer,
         sequence: _takeNextSequence(),
         sourceLayer: clearSelectionArea ? selection.layer : null,
@@ -2379,284 +2483,23 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   // Painting helpers shared with CustomPainter and off-screen rendering
-  ui.ImageShader? _toneShaderForTool(ToolType tool) {
-    switch (tool) {
-      case ToolType.tone30:
-        return _tone30Shader;
-      case ToolType.tone60:
-        return _tone60Shader;
-      case ToolType.tone80:
-        return _tone80Shader;
-      default:
-        return null;
-    }
-  }
-
   void _paintLayerSourceContents(
     Canvas canvas,
     DrawingLayer layer,
   ) {
-    final ui.Image? layerBaseImage = _getLayerBaseImage(layer);
-    if (layerBaseImage != null) {
-      canvas.drawImage(
-        layerBaseImage,
-        Offset.zero,
-        Paint()
-          ..isAntiAlias = false
-          ..filterQuality = FilterQuality.none,
-      );
-    }
-
-    final List<DrawnLine> layerLines = _lines
-        .where((DrawnLine line) => line.layer == layer)
-        .toList(growable: false);
-    final List<LayerPlacement> layerPlacements = _placements
-        .where((LayerPlacement placement) =>
-            placement.sourceLayer == layer || placement.targetLayer == layer)
-        .toList(growable: false);
-
-    int lineIndex = 0;
-    int placementIndex = 0;
-    while (lineIndex < layerLines.length ||
-        placementIndex < layerPlacements.length) {
-      final DrawnLine? nextLine =
-          lineIndex < layerLines.length ? layerLines[lineIndex] : null;
-      final LayerPlacement? nextPlacement =
-          placementIndex < layerPlacements.length
-              ? layerPlacements[placementIndex]
-              : null;
-
-      if (nextPlacement == null ||
-          (nextLine != null && nextLine.sequence < nextPlacement.sequence)) {
-        _paintLine(canvas, nextLine!);
-        lineIndex++;
-        continue;
-      }
-
-      if (nextPlacement.sourceLayer == layer &&
-          nextPlacement.sourceMaskPath != null) {
-        canvas.drawPath(
-          nextPlacement.sourceMaskPath!,
-          Paint()
-            ..blendMode = BlendMode.clear
-            ..isAntiAlias = false,
-        );
-      }
-      if (nextPlacement.targetLayer == layer) {
-        _paintLayerPlacement(canvas, nextPlacement);
-      }
-      placementIndex++;
-    }
-  }
-
-  void _paintLayerPlacement(Canvas canvas, LayerPlacement placement) {
-    final Rect rect = placement.baseRect;
-    final Offset center = rect.center + placement.translation;
-    canvas.save();
-    canvas.translate(center.dx, center.dy);
-    canvas.rotate(placement.rotation);
-    canvas.scale(placement.scaleX, placement.scaleY);
-    canvas.translate(-rect.center.dx, -rect.center.dy);
-    paintImage(
-      canvas: canvas,
-      rect: rect,
-      image: placement.image,
-      fit: BoxFit.fill,
-      filterQuality: FilterQuality.none,
+    LayerCompositePainter.paintSourceContentsUpTo(
+      canvas,
+      layer,
+      kLayerCompositeMaxSequence,
+      allLines: _lines,
+      allPlacements: _placements,
+      layerABaseImage: _layerABaseImage,
+      layerBBaseImage: _layerBBaseImage,
+      layerCBaseImage: _layerCBaseImage,
+      tone30Shader: _tone30Shader,
+      tone60Shader: _tone60Shader,
+      tone80Shader: _tone80Shader,
     );
-    canvas.restore();
-  }
-
-  void _paintLine(Canvas canvas, DrawnLine line) {
-    final paint = Paint()
-      ..isAntiAlias = true
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    final toneShader = line.isEraser ? null : _toneShaderForTool(line.tool);
-    final bool isToneStroke = toneShader != null;
-    paint
-      ..isAntiAlias = !isToneStroke
-      ..shader = toneShader
-      ..color = (toneShader == null ? line.color : Colors.white)
-          .withValues(alpha: line.eraserAlpha)
-      ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..filterQuality =
-          toneShader == null ? FilterQuality.low : FilterQuality.none;
-
-    switch (line.tool) {
-      case ToolType.rect:
-      case ToolType.fillRect:
-        if (line.shapeRect == null) return;
-        paint
-          ..style = line.tool == ToolType.fillRect
-              ? PaintingStyle.fill
-              : PaintingStyle.stroke
-          ..strokeCap = StrokeCap.butt
-          ..strokeJoin = StrokeJoin.miter
-          ..strokeWidth = line.width;
-        canvas.drawRect(line.shapeRect!, paint);
-        return;
-      case ToolType.circle:
-      case ToolType.fillCircle:
-        if (line.shapeRect == null) return;
-        paint
-          ..style = line.tool == ToolType.fillCircle
-              ? PaintingStyle.fill
-              : PaintingStyle.stroke
-          ..strokeWidth = line.width;
-        canvas.drawOval(line.shapeRect!, paint);
-        return;
-      case ToolType.line:
-        if (line.points.length < 2) return;
-        paint
-          ..strokeWidth = line.points.first.width
-          ..strokeCap = StrokeCap.butt
-          ..strokeJoin = StrokeJoin.miter;
-        final path = Path()
-          ..moveTo(line.points.first.offset.dx, line.points.first.offset.dy)
-          ..lineTo(line.points.last.offset.dx, line.points.last.offset.dy);
-        canvas.drawPath(path, paint);
-        return;
-      case ToolType.dot30:
-      case ToolType.dot60:
-      case ToolType.dot80:
-        if (line.points.isEmpty) return;
-        paint
-          ..style = PaintingStyle.fill
-          ..strokeWidth = 1;
-        for (final p in line.points) {
-          canvas.drawCircle(p.offset, line.width / 2, paint);
-        }
-        return;
-      default:
-        if (line.points.length < 2) return;
-        if (!line.variableWidth) {
-          final path = _buildSmoothPath(line.points);
-          paint
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = line.width;
-          canvas.drawPath(path, paint);
-          return;
-        }
-        final path = _buildVariableWidthRibbon(line.points);
-        paint
-          ..style = PaintingStyle.fill
-          ..strokeWidth = 1
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round;
-        canvas.drawPath(path, paint);
-    }
-  }
-
-  Path _buildSmoothPath(List<Point> points) {
-    final path = Path();
-    if (points.isEmpty) return path;
-    if (points.length == 1) {
-      path.addOval(Rect.fromCircle(
-          center: points.first.offset, radius: points.first.width / 2));
-      return path;
-    }
-    final filtered = _lowPassFilter(points, factor: 0.6);
-    path.moveTo(filtered.first.offset.dx, filtered.first.offset.dy);
-    for (int i = 1; i < filtered.length - 1; i++) {
-      final current = filtered[i].offset;
-      final next = filtered[i + 1].offset;
-      final mid = Offset(
-        (current.dx + next.dx) / 2,
-        (current.dy + next.dy) / 2,
-      );
-      path.quadraticBezierTo(current.dx, current.dy, mid.dx, mid.dy);
-    }
-    path.lineTo(filtered.last.offset.dx, filtered.last.offset.dy);
-    return path;
-  }
-
-  Path _buildVariableWidthRibbon(List<Point> points) {
-    if (points.length < 2) return Path();
-    final filtered = _lowPassFilter(points, factor: 0.15);
-    final dense = _catmullRomDensePoints(filtered, samples: 10);
-
-    final left = <Offset>[];
-    final right = <Offset>[];
-    for (int i = 0; i < dense.length; i++) {
-      final p = dense[i].offset;
-      final w = dense[i].width;
-      Offset dir;
-      if (i == 0) {
-        dir = dense[i + 1].offset - p;
-      } else if (i == dense.length - 1) {
-        dir = p - dense[i - 1].offset;
-      } else {
-        dir = dense[i + 1].offset - dense[i - 1].offset;
-      }
-      final len = dir.distance;
-      if (len < 0.001) continue;
-      final n = Offset(-dir.dy / len, dir.dx / len);
-      final halfW = w / 2;
-      left.add(p + n * halfW);
-      right.add(p - n * halfW);
-    }
-
-    final path = Path();
-    if (left.isEmpty || right.isEmpty) return path;
-    path.moveTo(left.first.dx, left.first.dy);
-    for (int i = 1; i < left.length; i++) {
-      path.lineTo(left[i].dx, left[i].dy);
-    }
-    for (int i = right.length - 1; i >= 0; i--) {
-      path.lineTo(right[i].dx, right[i].dy);
-    }
-    path.close();
-    return path;
-  }
-
-  List<Point> _catmullRomDensePoints(List<Point> pts, {int samples = 8}) {
-    if (pts.length < 2) return pts;
-    final List<Point> dense = [];
-    for (int i = 0; i < pts.length - 1; i++) {
-      final p0 = i == 0 ? pts[i] : pts[i - 1];
-      final p1 = pts[i];
-      final p2 = pts[i + 1];
-      final p3 = i + 2 < pts.length ? pts[i + 2] : pts[i + 1];
-      for (int s = 0; s < samples; s++) {
-        final t = s / samples;
-        final t2 = t * t;
-        final t3 = t2 * t;
-        final dx = 0.5 *
-            ((2 * p1.offset.dx) +
-                (-p0.offset.dx + p2.offset.dx) * t +
-                (2 * p0.offset.dx -
-                        5 * p1.offset.dx +
-                        4 * p2.offset.dx -
-                        p3.offset.dx) *
-                    t2 +
-                (-p0.offset.dx +
-                        3 * p1.offset.dx -
-                        3 * p2.offset.dx +
-                        p3.offset.dx) *
-                    t3);
-        final dy = 0.5 *
-            ((2 * p1.offset.dy) +
-                (-p0.offset.dy + p2.offset.dy) * t +
-                (2 * p0.offset.dy -
-                        5 * p1.offset.dy +
-                        4 * p2.offset.dy -
-                        p3.offset.dy) *
-                    t2 +
-                (-p0.offset.dy +
-                        3 * p1.offset.dy -
-                        3 * p2.offset.dy +
-                        p3.offset.dy) *
-                    t3);
-        final width = ui.lerpDouble(p1.width, p2.width, t)!;
-        dense.add(Point(Offset(dx, dy), width));
-      }
-    }
-    dense.add(pts.last);
-    return dense;
   }
 
   void _clearSelectionArea(Canvas canvas, LassoSelection selection) {
@@ -2672,34 +2515,18 @@ class DrawingProvider extends ChangeNotifier {
     Canvas canvas,
     LassoSelection selection,
   ) {
-    final Rect rect = selection.baseRect;
-    final Offset center = rect.center + selection.translation;
-    canvas.save();
-    canvas.translate(center.dx, center.dy);
-    canvas.rotate(selection.rotation);
-    canvas.scale(selection.scaleX, selection.scaleY);
-    canvas.translate(-rect.center.dx, -rect.center.dy);
-    paintImage(
-      canvas: canvas,
-      rect: rect,
-      image: selection.image,
-      fit: BoxFit.fill,
-      filterQuality: FilterQuality.none,
+    LayerCompositePainter.paintLassoSelection(
+      canvas,
+      selection,
+      allLines: _lines,
+      allPlacements: _placements,
+      layerABaseImage: _layerABaseImage,
+      layerBBaseImage: _layerBBaseImage,
+      layerCBaseImage: _layerCBaseImage,
+      tone30Shader: _tone30Shader,
+      tone60Shader: _tone60Shader,
+      tone80Shader: _tone80Shader,
     );
-    canvas.restore();
-  }
-
-  List<Point> _lowPassFilter(List<Point> points, {double factor = 0.55}) {
-    if (points.length < 2) return points;
-    final result = <Point>[points.first];
-    for (int i = 1; i < points.length; i++) {
-      final previous = result.last;
-      final current = points[i];
-      final filteredOffset =
-          Offset.lerp(previous.offset, current.offset, factor)!;
-      result.add(Point(filteredOffset, current.width));
-    }
-    return result;
   }
 }
 

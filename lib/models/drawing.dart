@@ -74,7 +74,10 @@ class Point {
 }
 
 class LassoSelection {
-  final Image image;
+  /// Text / pasted bitmap selection. Null = vector lasso (replay strokes under mask).
+  final Image? rasterImage;
+  /// When [rasterImage] is null, replay layer content with `sequence <= maxContentSequence`.
+  final int maxContentSequence;
   final Path maskPath;
   final DrawingLayer layer;
   Rect baseRect;
@@ -84,7 +87,8 @@ class LassoSelection {
   double rotation; // radians
 
   LassoSelection({
-    required this.image,
+    this.rasterImage,
+    this.maxContentSequence = 0,
     required this.maskPath,
     required this.layer,
     required this.baseRect,
@@ -92,7 +96,12 @@ class LassoSelection {
     this.scaleX = 1.0,
     this.scaleY = 1.0,
     this.rotation = 0.0,
-  });
+  }) : assert(
+          rasterImage != null || maxContentSequence >= 0,
+          'Vector lasso requires a non-negative maxContentSequence.',
+        );
+
+  bool get isVectorSelection => rasterImage == null;
 
   Offset get _center => baseRect.center;
 
@@ -159,7 +168,13 @@ class LassoSelection {
 }
 
 class LayerPlacement {
-  final Image image;
+  /// Committed bitmap (e.g. text). Null when this is a vector (replay) placement.
+  final Image? rasterImage;
+  /// Vector placement: replay this layer up to [vectorMaxSequence], clipped by [vectorMaskPath].
+  final DrawingLayer? vectorSourceLayer;
+  final Path? vectorMaskPath;
+  final int? vectorMaxSequence;
+
   final DrawingLayer targetLayer;
   final int sequence;
   final DrawingLayer? sourceLayer;
@@ -171,7 +186,10 @@ class LayerPlacement {
   final double rotation;
 
   LayerPlacement({
-    required this.image,
+    this.rasterImage,
+    this.vectorSourceLayer,
+    this.vectorMaskPath,
+    this.vectorMaxSequence,
     required this.targetLayer,
     this.sequence = 0,
     required this.baseRect,
@@ -181,5 +199,17 @@ class LayerPlacement {
     this.scaleX = 1.0,
     this.scaleY = 1.0,
     this.rotation = 0.0,
-  });
+  }) : assert(
+          (rasterImage != null) ^
+              (vectorSourceLayer != null &&
+                  vectorMaskPath != null &&
+                  vectorMaxSequence != null),
+          'LayerPlacement must be either raster or vector.',
+        );
+
+  bool get isVectorPlacement =>
+      rasterImage == null &&
+      vectorSourceLayer != null &&
+      vectorMaskPath != null &&
+      vectorMaxSequence != null;
 }
