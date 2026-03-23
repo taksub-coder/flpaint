@@ -22,6 +22,9 @@ class _DrawingSnapshot {
   final ui.Image? layerABaseImage;
   final ui.Image? layerBBaseImage;
   final ui.Image? layerCBaseImage;
+  final RasterSamplingMode layerABaseSampling;
+  final RasterSamplingMode layerBBaseSampling;
+  final RasterSamplingMode layerCBaseSampling;
   final LassoSelection? selection;
   final bool selectionMasksSource;
   final bool selectionHandlesFilled;
@@ -34,6 +37,9 @@ class _DrawingSnapshot {
     required this.layerABaseImage,
     required this.layerBBaseImage,
     required this.layerCBaseImage,
+    required this.layerABaseSampling,
+    required this.layerBBaseSampling,
+    required this.layerCBaseSampling,
     required this.selection,
     required this.selectionMasksSource,
     required this.selectionHandlesFilled,
@@ -127,6 +133,9 @@ class DrawingProvider extends ChangeNotifier {
   ui.Image? _layerABaseImage;
   ui.Image? _layerBBaseImage;
   ui.Image? _layerCBaseImage;
+  RasterSamplingMode _layerABaseSampling = RasterSamplingMode.pixelated;
+  RasterSamplingMode _layerBBaseSampling = RasterSamplingMode.pixelated;
+  RasterSamplingMode _layerCBaseSampling = RasterSamplingMode.pixelated;
   Size _canvasSize = Size.zero;
   ui.ImageShader? _tone30Shader;
   ui.ImageShader? _tone60Shader;
@@ -180,6 +189,9 @@ class DrawingProvider extends ChangeNotifier {
   ui.Image? get layerABaseImage => _layerABaseImage;
   ui.Image? get layerBBaseImage => _layerBBaseImage;
   ui.Image? get layerCBaseImage => _layerCBaseImage;
+  RasterSamplingMode get layerABaseSampling => _layerABaseSampling;
+  RasterSamplingMode get layerBBaseSampling => _layerBBaseSampling;
+  RasterSamplingMode get layerCBaseSampling => _layerCBaseSampling;
   ui.ImageShader? get tone30Shader => _tone30Shader;
   ui.ImageShader? get tone60Shader => _tone60Shader;
   ui.ImageShader? get tone80Shader => _tone80Shader;
@@ -568,16 +580,23 @@ class DrawingProvider extends ChangeNotifier {
     final ui.FrameInfo frame = await codec.getNextFrame();
     codec.dispose();
 
-    final ui.Image fitted = await _fitImportedImageToCanvas(
+    final Size canvasSize =
+        _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    final Rect dstRect = _fitImportedImageRectToCanvas(
       frame.image,
-      _ioCanvasSize,
+      canvasSize,
     );
-    final ui.Image merged = await _mergeImageIntoLayerBase(
+    final ui.Image merged = await _mergeImportedImageIntoLayerBase(
       _activeLayer,
-      fitted,
-      _ioCanvasSize,
+      frame.image,
+      dstRect,
+      canvasSize,
     );
-    _setLayerBaseImage(_activeLayer, merged);
+    _setLayerBaseImage(
+      _activeLayer,
+      merged,
+      sampling: RasterSamplingMode.smooth,
+    );
     notifyListeners();
   }
 
@@ -711,39 +730,59 @@ class DrawingProvider extends ChangeNotifier {
     );
   }
 
-  Future<ui.Image> _fitImportedImageToCanvas(
-      ui.Image source, Size canvasSize) async {
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawColor(Colors.transparent, BlendMode.src);
-
+  Rect _fitImportedImageRectToCanvas(ui.Image source, Size canvasSize) {
     final double srcW = source.width.toDouble();
     final double srcH = source.height.toDouble();
     final double scale = math.min(
       1.0,
       math.min(canvasSize.width / srcW, canvasSize.height / srcH),
     );
-    final Rect srcRect = Rect.fromLTWH(0, 0, srcW, srcH);
-    final Rect dstRect = Rect.fromLTWH(0, 0, srcW * scale, srcH * scale);
-    canvas.drawImageRect(source, srcRect, dstRect, Paint());
-
-    final picture = recorder.endRecording();
-    return picture.toImage(canvasSize.width.ceil(), canvasSize.height.ceil());
+    return Rect.fromLTWH(0, 0, srcW * scale, srcH * scale);
   }
 
-  Future<ui.Image> _mergeImageIntoLayerBase(
+  Future<ui.Image> _mergeImportedImageIntoLayerBase(
     DrawingLayer layer,
     ui.Image importImage,
+    Rect dstRect,
     Size canvasSize,
   ) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
-    final layerBase = _getLayerBaseImage(layer);
-    if (layerBase != null) {
-      canvas.drawImage(layerBase, Offset.zero, Paint());
+
+    final ui.Image? layerBaseImage = switch (layer) {
+      DrawingLayer.layerA => _layerABaseImage,
+      DrawingLayer.layerB => _layerBBaseImage,
+      DrawingLayer.layerC => _layerCBaseImage,
+    };
+
+    if (layerBaseImage != null) {
+      canvas.drawImage(
+        layerBaseImage,
+        Offset.zero,
+        Paint()
+          ..isAntiAlias = false
+          ..filterQuality =
+              _layerBaseSamplingFor(layer) == RasterSamplingMode.smooth
+                  ? FilterQuality.medium
+                  : FilterQuality.none,
+      );
     }
-    canvas.drawImage(importImage, Offset.zero, Paint());
+
+    canvas.drawImageRect(
+      importImage,
+      Rect.fromLTWH(
+        0,
+        0,
+        importImage.width.toDouble(),
+        importImage.height.toDouble(),
+      ),
+      dstRect,
+      Paint()
+        ..isAntiAlias = true
+        ..filterQuality = FilterQuality.medium,
+    );
+
     final picture = recorder.endRecording();
     return picture.toImage(canvasSize.width.ceil(), canvasSize.height.ceil());
   }
@@ -1155,20 +1194,12 @@ class DrawingProvider extends ChangeNotifier {
     _layerABaseImage = null;
     _layerBBaseImage = null;
     _layerCBaseImage = null;
+    _layerABaseSampling = RasterSamplingMode.pixelated;
+    _layerBBaseSampling = RasterSamplingMode.pixelated;
+    _layerCBaseSampling = RasterSamplingMode.pixelated;
     _shapeStart = null;
     _shapeEnd = null;
     notifyListeners();
-  }
-
-  ui.Image? _getLayerBaseImage(DrawingLayer layer) {
-    switch (layer) {
-      case DrawingLayer.layerA:
-        return _layerABaseImage;
-      case DrawingLayer.layerB:
-        return _layerBBaseImage;
-      case DrawingLayer.layerC:
-        return _layerCBaseImage;
-    }
   }
 
   double _layerOpacityFor(DrawingLayer layer) {
@@ -1210,16 +1241,37 @@ class DrawingProvider extends ChangeNotifier {
     }
   }
 
-  void _setLayerBaseImage(DrawingLayer layer, ui.Image? image) {
+  RasterSamplingMode _layerBaseSamplingFor(DrawingLayer layer) {
+    switch (layer) {
+      case DrawingLayer.layerA:
+        return _layerABaseSampling;
+      case DrawingLayer.layerB:
+        return _layerBBaseSampling;
+      case DrawingLayer.layerC:
+        return _layerCBaseSampling;
+    }
+  }
+
+  void _setLayerBaseImage(
+    DrawingLayer layer,
+    ui.Image? image, {
+    RasterSamplingMode sampling = RasterSamplingMode.pixelated,
+  }) {
     switch (layer) {
       case DrawingLayer.layerA:
         _layerABaseImage = image;
+        _layerABaseSampling =
+            image == null ? RasterSamplingMode.pixelated : sampling;
         break;
       case DrawingLayer.layerB:
         _layerBBaseImage = image;
+        _layerBBaseSampling =
+            image == null ? RasterSamplingMode.pixelated : sampling;
         break;
       case DrawingLayer.layerC:
         _layerCBaseImage = image;
+        _layerCBaseSampling =
+            image == null ? RasterSamplingMode.pixelated : sampling;
         break;
     }
   }
@@ -1354,6 +1406,9 @@ class DrawingProvider extends ChangeNotifier {
       layerABaseImage: _layerABaseImage,
       layerBBaseImage: _layerBBaseImage,
       layerCBaseImage: _layerCBaseImage,
+      layerABaseSampling: _layerABaseSampling,
+      layerBBaseSampling: _layerBBaseSampling,
+      layerCBaseSampling: _layerCBaseSampling,
       selection: _cloneSelection(_selection),
       selectionMasksSource: _selectionMasksSource,
       selectionHandlesFilled: _selectionHandlesFilled,
@@ -1372,6 +1427,9 @@ class DrawingProvider extends ChangeNotifier {
     _layerABaseImage = snapshot.layerABaseImage;
     _layerBBaseImage = snapshot.layerBBaseImage;
     _layerCBaseImage = snapshot.layerCBaseImage;
+    _layerABaseSampling = snapshot.layerABaseSampling;
+    _layerBBaseSampling = snapshot.layerBBaseSampling;
+    _layerCBaseSampling = snapshot.layerCBaseSampling;
     _selection = _cloneSelection(snapshot.selection);
     _selectionMasksSource = snapshot.selectionMasksSource;
     _selectionHandlesFilled = snapshot.selectionHandlesFilled;
@@ -1404,6 +1462,7 @@ class DrawingProvider extends ChangeNotifier {
   LayerPlacement _clonePlacement(LayerPlacement src) {
     return LayerPlacement(
       rasterImage: src.rasterImage,
+      rasterSampling: src.rasterSampling,
       vectorSourceLayer: src.vectorSourceLayer,
       vectorMaskPath: src.vectorMaskPath == null
           ? null
@@ -2457,9 +2516,8 @@ class DrawingProvider extends ChangeNotifier {
         vectorMaskPath: selection.rasterImage == null
             ? (Path()..addPath(selection.maskPath, Offset.zero))
             : null,
-        vectorMaxSequence: selection.rasterImage == null
-            ? selection.maxContentSequence
-            : null,
+        vectorMaxSequence:
+            selection.rasterImage == null ? selection.maxContentSequence : null,
         targetLayer: layer,
         sequence: _takeNextSequence(),
         sourceLayer: clearSelectionArea ? selection.layer : null,
@@ -2496,6 +2554,9 @@ class DrawingProvider extends ChangeNotifier {
       layerABaseImage: _layerABaseImage,
       layerBBaseImage: _layerBBaseImage,
       layerCBaseImage: _layerCBaseImage,
+      layerABaseSampling: _layerABaseSampling,
+      layerBBaseSampling: _layerBBaseSampling,
+      layerCBaseSampling: _layerCBaseSampling,
       tone30Shader: _tone30Shader,
       tone60Shader: _tone60Shader,
       tone80Shader: _tone80Shader,
@@ -2523,6 +2584,9 @@ class DrawingProvider extends ChangeNotifier {
       layerABaseImage: _layerABaseImage,
       layerBBaseImage: _layerBBaseImage,
       layerCBaseImage: _layerCBaseImage,
+      layerABaseSampling: _layerABaseSampling,
+      layerBBaseSampling: _layerBBaseSampling,
+      layerCBaseSampling: _layerCBaseSampling,
       tone30Shader: _tone30Shader,
       tone60Shader: _tone60Shader,
       tone80Shader: _tone80Shader,

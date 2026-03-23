@@ -92,6 +92,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       layerABaseImage: drawing.layerABaseImage,
                       layerBBaseImage: drawing.layerBBaseImage,
                       layerCBaseImage: drawing.layerCBaseImage,
+                      layerABaseSampling: drawing.layerABaseSampling,
+                      layerBBaseSampling: drawing.layerBBaseSampling,
+                      layerCBaseSampling: drawing.layerCBaseSampling,
                       tone30Shader: drawing.tone30Shader,
                       tone60Shader: drawing.tone60Shader,
                       tone80Shader: drawing.tone80Shader,
@@ -720,6 +723,9 @@ class DrawingPainter extends CustomPainter {
   final ui.Image? layerABaseImage;
   final ui.Image? layerBBaseImage;
   final ui.Image? layerCBaseImage;
+  final RasterSamplingMode layerABaseSampling;
+  final RasterSamplingMode layerBBaseSampling;
+  final RasterSamplingMode layerCBaseSampling;
   final ui.ImageShader? tone30Shader;
   final ui.ImageShader? tone60Shader;
   final ui.ImageShader? tone80Shader;
@@ -749,6 +755,9 @@ class DrawingPainter extends CustomPainter {
     required this.layerABaseImage,
     required this.layerBBaseImage,
     required this.layerCBaseImage,
+    required this.layerABaseSampling,
+    required this.layerBBaseSampling,
+    required this.layerCBaseSampling,
     required this.tone30Shader,
     required this.tone60Shader,
     required this.tone80Shader,
@@ -794,7 +803,7 @@ class DrawingPainter extends CustomPainter {
       canvas,
       canvasSize,
       DrawingLayer.layerA,
-      layerABaseImage,
+      null,
       isVisible: isLayerAVisible,
       opacity: layerAOpacity,
       holePath: layerAHolePath,
@@ -803,7 +812,7 @@ class DrawingPainter extends CustomPainter {
       canvas,
       canvasSize,
       DrawingLayer.layerB,
-      layerBBaseImage,
+      null,
       isVisible: isLayerBVisible,
       opacity: layerBOpacity,
       holePath: layerBHolePath,
@@ -812,7 +821,7 @@ class DrawingPainter extends CustomPainter {
       canvas,
       canvasSize,
       DrawingLayer.layerC,
-      layerCBaseImage,
+      null,
       isVisible: isLayerCVisible,
       opacity: layerCOpacity,
       holePath: layerCHolePath,
@@ -906,6 +915,9 @@ class DrawingPainter extends CustomPainter {
       layerABaseImage: layerABaseImage,
       layerBBaseImage: layerBBaseImage,
       layerCBaseImage: layerCBaseImage,
+      layerABaseSampling: layerABaseSampling,
+      layerBBaseSampling: layerBBaseSampling,
+      layerCBaseSampling: layerCBaseSampling,
       tone30Shader: tone30Shader,
       tone60Shader: tone60Shader,
       tone80Shader: tone80Shader,
@@ -924,6 +936,9 @@ class DrawingPainter extends CustomPainter {
       layerABaseImage: layerABaseImage,
       layerBBaseImage: layerBBaseImage,
       layerCBaseImage: layerCBaseImage,
+      layerABaseSampling: layerABaseSampling,
+      layerBBaseSampling: layerBBaseSampling,
+      layerCBaseSampling: layerCBaseSampling,
       tone30Shader: tone30Shader,
       tone60Shader: tone60Shader,
       tone80Shader: tone80Shader,

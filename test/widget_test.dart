@@ -20,6 +20,6 @@ void main() {
       ),
     );
 
-    expect(find.text('FLPaint'), findsOneWidget);
+    expect(find.textContaining('FLPaint'), findsOneWidget);
   });
 }

@@ -27,6 +27,22 @@ class LayerCompositePainter {
     }
   }
 
+  static RasterSamplingMode _baseSamplingForLayer(
+    DrawingLayer layer, {
+    required RasterSamplingMode layerABaseSampling,
+    required RasterSamplingMode layerBBaseSampling,
+    required RasterSamplingMode layerCBaseSampling,
+  }) {
+    switch (layer) {
+      case DrawingLayer.layerA:
+        return layerABaseSampling;
+      case DrawingLayer.layerB:
+        return layerBBaseSampling;
+      case DrawingLayer.layerC:
+        return layerCBaseSampling;
+    }
+  }
+
   static ui.ImageShader? _toneShaderForTool(
     ToolType tool, {
     required ui.ImageShader? tone30Shader,
@@ -55,6 +71,9 @@ class LayerCompositePainter {
     required ui.Image? layerABaseImage,
     required ui.Image? layerBBaseImage,
     required ui.Image? layerCBaseImage,
+    required RasterSamplingMode layerABaseSampling,
+    required RasterSamplingMode layerBBaseSampling,
+    required RasterSamplingMode layerCBaseSampling,
     required ui.ImageShader? tone30Shader,
     required ui.ImageShader? tone60Shader,
     required ui.ImageShader? tone80Shader,
@@ -71,12 +90,20 @@ class LayerCompositePainter {
       layerCBaseImage: layerCBaseImage,
     );
     if (layerBaseImage != null) {
+      final RasterSamplingMode baseSampling = _baseSamplingForLayer(
+        layer,
+        layerABaseSampling: layerABaseSampling,
+        layerBBaseSampling: layerBBaseSampling,
+        layerCBaseSampling: layerCBaseSampling,
+      );
       canvas.drawImage(
         layerBaseImage,
         Offset.zero,
         Paint()
           ..isAntiAlias = false
-          ..filterQuality = FilterQuality.none,
+          ..filterQuality = baseSampling == RasterSamplingMode.smooth
+              ? FilterQuality.medium
+              : FilterQuality.none,
       );
     }
 
@@ -144,6 +171,9 @@ class LayerCompositePainter {
           layerABaseImage: layerABaseImage,
           layerBBaseImage: layerBBaseImage,
           layerCBaseImage: layerCBaseImage,
+          layerABaseSampling: layerABaseSampling,
+          layerBBaseSampling: layerBBaseSampling,
+          layerCBaseSampling: layerCBaseSampling,
           tone30Shader: tone30Shader,
           tone60Shader: tone60Shader,
           tone80Shader: tone80Shader,
@@ -162,6 +192,9 @@ class LayerCompositePainter {
     required ui.Image? layerABaseImage,
     required ui.Image? layerBBaseImage,
     required ui.Image? layerCBaseImage,
+    required RasterSamplingMode layerABaseSampling,
+    required RasterSamplingMode layerBBaseSampling,
+    required RasterSamplingMode layerCBaseSampling,
     required ui.ImageShader? tone30Shader,
     required ui.ImageShader? tone60Shader,
     required ui.ImageShader? tone80Shader,
@@ -185,6 +218,9 @@ class LayerCompositePainter {
         layerABaseImage: layerABaseImage,
         layerBBaseImage: layerBBaseImage,
         layerCBaseImage: layerCBaseImage,
+        layerABaseSampling: layerABaseSampling,
+        layerBBaseSampling: layerBBaseSampling,
+        layerCBaseSampling: layerCBaseSampling,
         tone30Shader: tone30Shader,
         tone60Shader: tone60Shader,
         tone80Shader: tone80Shader,
@@ -209,7 +245,9 @@ class LayerCompositePainter {
       rect: rect,
       image: img,
       fit: BoxFit.fill,
-      filterQuality: FilterQuality.none,
+      filterQuality: placement.rasterSampling == RasterSamplingMode.smooth
+          ? FilterQuality.medium
+          : FilterQuality.none,
     );
     canvas.restore();
   }
@@ -222,6 +260,9 @@ class LayerCompositePainter {
     required ui.Image? layerABaseImage,
     required ui.Image? layerBBaseImage,
     required ui.Image? layerCBaseImage,
+    required RasterSamplingMode layerABaseSampling,
+    required RasterSamplingMode layerBBaseSampling,
+    required RasterSamplingMode layerCBaseSampling,
     required ui.ImageShader? tone30Shader,
     required ui.ImageShader? tone60Shader,
     required ui.ImageShader? tone80Shader,
@@ -263,6 +304,9 @@ class LayerCompositePainter {
       layerABaseImage: layerABaseImage,
       layerBBaseImage: layerBBaseImage,
       layerCBaseImage: layerCBaseImage,
+      layerABaseSampling: layerABaseSampling,
+      layerBBaseSampling: layerBBaseSampling,
+      layerCBaseSampling: layerCBaseSampling,
       tone30Shader: tone30Shader,
       tone60Shader: tone60Shader,
       tone80Shader: tone80Shader,
@@ -430,7 +474,8 @@ class LayerCompositePainter {
     return path;
   }
 
-  static List<Point> _catmullRomDensePoints(List<Point> pts, {int samples = 8}) {
+  static List<Point> _catmullRomDensePoints(List<Point> pts,
+      {int samples = 8}) {
     if (pts.length < 2) return pts;
     final List<Point> dense = [];
     for (int i = 0; i < pts.length - 1; i++) {
@@ -476,7 +521,8 @@ class LayerCompositePainter {
     return dense;
   }
 
-  static List<Point> _lowPassFilter(List<Point> points, {double factor = 0.55}) {
+  static List<Point> _lowPassFilter(List<Point> points,
+      {double factor = 0.55}) {
     if (points.length < 2) return points;
     final result = <Point>[points.first];
     for (int i = 1; i < points.length; i++) {

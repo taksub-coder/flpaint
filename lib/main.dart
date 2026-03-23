@@ -1,4 +1,4 @@
-//flpaint_プロトタイプ1.8_バックアップ機能実装
+//flpaint_プロンプト2.0_BK実装と小文字21_インポート修正Ver
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -29,7 +29,7 @@ void main() async {
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
-      title: 'flpaint_プロトタイプ1.8_バックアップ機能実装',
+      title: 'flpaint_プロンプト2.0_BK実装と小文字21_インポート修正ver',
       // 必要に応じて windowButtonVisibility: false, などを追加可能
     );
 
@@ -57,7 +57,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'flpaint_プロトタイプ1.5',
+      title: 'flpaint_プロトタイプ2.0',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,
@@ -223,7 +223,7 @@ class _MyHomePageState extends State<MyHomePage> {
         preferredSize: const Size.fromHeight(kToolbarHeight),
         child: _buildWindowMovablePanel(
           child: AppBar(
-            title: const Text('FLPaint'),
+            title: const Text('FLPaint プロトタイプ2.1'),
             actions: [
               IconButton(
                   icon: const Icon(Icons.undo),

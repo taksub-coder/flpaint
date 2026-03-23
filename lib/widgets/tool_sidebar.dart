@@ -222,7 +222,7 @@ class ToolSidebar extends StatelessWidget {
     if (!context.mounted) return;
 
     final double fontSize = switch (result.sizeOption) {
-      _TextSizeOption.small => 16,
+      _TextSizeOption.small => 21,
       _TextSizeOption.medium => 32,
       _TextSizeOption.large => 64,
     };

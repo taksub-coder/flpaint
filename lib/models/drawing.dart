@@ -76,6 +76,7 @@ class Point {
 class LassoSelection {
   /// Text / pasted bitmap selection. Null = vector lasso (replay strokes under mask).
   final Image? rasterImage;
+
   /// When [rasterImage] is null, replay layer content with `sequence <= maxContentSequence`.
   final int maxContentSequence;
   final Path maskPath;
@@ -167,9 +168,16 @@ class LassoSelection {
   }
 }
 
+enum RasterSamplingMode {
+  pixelated,
+  smooth,
+}
+
 class LayerPlacement {
   /// Committed bitmap (e.g. text). Null when this is a vector (replay) placement.
   final Image? rasterImage;
+  final RasterSamplingMode rasterSampling;
+
   /// Vector placement: replay this layer up to [vectorMaxSequence], clipped by [vectorMaskPath].
   final DrawingLayer? vectorSourceLayer;
   final Path? vectorMaskPath;
@@ -187,6 +195,7 @@ class LayerPlacement {
 
   LayerPlacement({
     this.rasterImage,
+    this.rasterSampling = RasterSamplingMode.pixelated,
     this.vectorSourceLayer,
     this.vectorMaskPath,
     this.vectorMaxSequence,
