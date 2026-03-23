@@ -1653,6 +1653,33 @@ class DrawingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void cancelActiveInputGesture() {
+    bool changed = false;
+
+    if (_isShapeTool(_tool)) {
+      if (_shapeStart != null || _shapeEnd != null) {
+        _shapeStart = null;
+        _shapeEnd = null;
+        changed = true;
+      }
+    } else if (_currentLine != null) {
+      _lines.remove(_currentLine);
+      _currentLine = null;
+      _lineStartPoint = null;
+      changed = true;
+    }
+
+    if (_isDrawingLasso) {
+      _lassoPoints.clear();
+      _isDrawingLasso = false;
+      changed = true;
+    }
+
+    if (changed) {
+      notifyListeners();
+    }
+  }
+
   bool _isShapeTool(ToolType tool) {
     return tool == ToolType.rect ||
         tool == ToolType.fillRect ||

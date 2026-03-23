@@ -1,4 +1,4 @@
-//flpaint_プロンプト2.0_BK実装と小文字21_インポート修正Ver
+//flpaint_プロンプト2.1_BK実装と小文字21_インポート修正Ver
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -29,7 +29,7 @@ void main() async {
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
-      title: 'flpaint_プロンプト2.0_BK実装と小文字21_インポート修正ver',
+      title: 'flpaint_プロンプト2.1_BK実装と小文字21_インポート修正ver',
       // 必要に応じて windowButtonVisibility: false, などを追加可能
     );
 
@@ -57,7 +57,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'flpaint_プロトタイプ2.0',
+      title: 'flpaint_プロトタイプ2.1',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,

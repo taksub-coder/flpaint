@@ -456,7 +456,7 @@ class _TextInputDialogState extends State<_TextInputDialog> {
                 items: const [
                   DropdownMenuItem(
                     value: _TextSizeOption.small,
-                    child: Text('小 (16px)'),
+                    child: Text('小 (21px)'),
                   ),
                   DropdownMenuItem(
                     value: _TextSizeOption.medium,

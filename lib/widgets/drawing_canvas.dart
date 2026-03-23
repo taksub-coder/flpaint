@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/drawing.dart';
@@ -37,6 +38,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   bool _ignoreDrawingGestures = false;
   int? _activeSelectionPointer;
   int? _activeDrawPointer;
+  int? _activeSecondaryPointer;
   Offset? _pendingDrawStart;
   bool _activeDrawStarted = false;
   DateTime? _lastFlipTime;
@@ -143,7 +145,18 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _activeDrawPointer = null;
     _pendingDrawStart = null;
     _activeDrawStarted = false;
-    drawing.cancelCurrentLine();
+    drawing.cancelActiveInputGesture();
+  }
+
+  bool _isSecondaryMouseGesture(PointerEvent event) {
+    return event.kind == ui.PointerDeviceKind.mouse &&
+        (event.buttons & kSecondaryMouseButton) != 0;
+  }
+
+  void _beginSecondaryPan(PointerEvent event, DrawingProvider drawing) {
+    _activeSecondaryPointer = event.pointer;
+    _tapDownPosition = null;
+    _cancelDrawingForTwoFinger(drawing);
   }
 
   Offset _toCanvasPosition(Offset globalPosition, {Offset? fallbackLocal}) {
@@ -212,6 +225,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _syncIgnoreDrawingGestures() {
     final bool shouldIgnore = _isTwoFingerTouchActive ||
+        _activeSecondaryPointer != null ||
         _activeSelectionPointer != null ||
         _activeDrawPointer != null;
     if (_ignoreDrawingGestures == shouldIgnore) return;
@@ -305,7 +319,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       }
     }
 
+    if (_isSecondaryMouseGesture(event)) {
+      _beginSecondaryPan(event, drawing);
+      _syncIgnoreDrawingGestures();
+      return;
+    }
+
     if (_activeSelectionPointer != null ||
+        _activeSecondaryPointer != null ||
         _activeDrawPointer != null ||
         _isTwoFingerTouchActive) {
       return;
@@ -319,6 +340,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _handlePointerMove(PointerMoveEvent event, DrawingProvider drawing) {
+    if (_activeSecondaryPointer == event.pointer) {
+      if (!_isSecondaryMouseGesture(event)) {
+        _activeSecondaryPointer = null;
+        _syncIgnoreDrawingGestures();
+      }
+      return;
+    }
+
     if (_activeSelectionPointer == event.pointer) {
       final pos = _toCanvasPosition(
         event.position,
@@ -407,6 +436,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _handlePointerUpOrCancel(PointerEvent event, DrawingProvider drawing) {
+    if (_activeSecondaryPointer == event.pointer) {
+      _activeSecondaryPointer = null;
+    }
+
     if (_activeSelectionPointer == event.pointer) {
       _dragState = null;
       _setSelectionHandleInteraction(false);
@@ -439,7 +472,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _handleTapDown(TapDownDetails details) {
-    if (_activeSelectionPointer != null || _activeDrawPointer != null) {
+    if (_activeSecondaryPointer != null ||
+        _activeSelectionPointer != null ||
+        _activeDrawPointer != null) {
       _tapDownPosition = null;
       return;
     }
@@ -475,6 +510,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _handlePanStart(DragStartDetails details, DrawingProvider drawing) {
     if (_isTwoFingerTouchActive) {
+      _lastOffset = null;
+      _dragState = null;
+      return;
+    }
+    if (_activeSecondaryPointer != null) {
       _lastOffset = null;
       _dragState = null;
       return;
@@ -523,6 +563,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _handlePanUpdate(DragUpdateDetails details, DrawingProvider drawing) {
     if (_isTwoFingerTouchActive) return;
+    if (_activeSecondaryPointer != null) return;
     if (_activeDrawPointer != null) return;
     if (_activeSelectionPointer != null) return;
     final pos = _toCanvasPosition(
@@ -547,6 +588,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _handlePanEnd(DrawingProvider drawing) {
     if (_isTwoFingerTouchActive) {
+      _dragState = null;
+      _lastOffset = null;
+      return;
+    }
+    if (_activeSecondaryPointer != null) {
       _dragState = null;
       _lastOffset = null;
       return;
