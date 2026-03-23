@@ -168,6 +168,13 @@ class ToolSidebar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _ToolButton(
+                  label: drawing.useWhiteStrokeColor ? 'White' : 'Black',
+                  tooltip: 'Toggle stroke color',
+                  selected: drawing.useWhiteStrokeColor,
+                  onTap: drawing.toggleStrokeColorMode,
+                ),
+                const SizedBox(height: 8),
+                _ToolButton(
                   label: 'Bk',
                   tooltip: 'Backup layers',
                   selected: false,

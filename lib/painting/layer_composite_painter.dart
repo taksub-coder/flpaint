@@ -338,8 +338,15 @@ class LayerCompositePainter {
     paint
       ..isAntiAlias = !isToneStroke
       ..shader = toneShader
-      ..color = (toneShader == null ? line.color : Colors.white)
-          .withValues(alpha: line.eraserAlpha)
+      ..color = toneShader == null
+          ? line.color.withValues(alpha: line.eraserAlpha)
+          : Colors.white
+      ..colorFilter = toneShader == null
+          ? null
+          : ColorFilter.mode(
+              line.color.withValues(alpha: line.eraserAlpha),
+              BlendMode.srcIn,
+            )
       ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round

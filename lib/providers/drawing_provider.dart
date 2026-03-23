@@ -121,6 +121,7 @@ class DrawingProvider extends ChangeNotifier {
   double _strokeWidth = 5.0;
   double _eraserWidth = 5.0;
   ToolType _tool = ToolType.pen;
+  bool _useWhiteStrokeColor = false;
   DrawingLayer _activeLayer = DrawingLayer.layerA;
   bool _isLayerAVisible = true;
   bool _isLayerBVisible = true;
@@ -179,6 +180,9 @@ class DrawingProvider extends ChangeNotifier {
   double get strokeWidth => _strokeWidth;
   double get eraserWidth => _eraserWidth;
   ToolType get currentTool => _tool;
+  bool get useWhiteStrokeColor => _useWhiteStrokeColor;
+  Color get currentStrokeColor =>
+      _useWhiteStrokeColor ? Colors.white : Colors.black;
   DrawingLayer get activeLayer => _activeLayer;
   bool get isLayerAVisible => _isLayerAVisible;
   bool get isLayerBVisible => _isLayerBVisible;
@@ -441,6 +445,11 @@ class DrawingProvider extends ChangeNotifier {
     if (tool != ToolType.eraser) {
       _nextEraserFullErase = false;
     }
+    notifyListeners();
+  }
+
+  void toggleStrokeColorMode() {
+    _useWhiteStrokeColor = !_useWhiteStrokeColor;
     notifyListeners();
   }
 
@@ -1372,7 +1381,7 @@ class DrawingProvider extends ChangeNotifier {
   Color _strokeColorForTool(ToolType tool) {
     switch (tool) {
       default:
-        return Colors.black;
+        return currentStrokeColor;
     }
   }
 
@@ -1696,7 +1705,7 @@ class DrawingProvider extends ChangeNotifier {
   void _addRect(Rect rect, {required bool fill}) {
     _lines.add(DrawnLine(
       const [],
-      color: Colors.black,
+      color: currentStrokeColor,
       width: _strokeWidth,
       tool: fill ? ToolType.fillRect : ToolType.rect,
       sequence: _takeNextSequence(),
@@ -1711,7 +1720,7 @@ class DrawingProvider extends ChangeNotifier {
   void _addCircle(Rect rect, {required bool fill}) {
     _lines.add(DrawnLine(
       const [],
-      color: Colors.black,
+      color: currentStrokeColor,
       width: _strokeWidth,
       tool: fill ? ToolType.fillCircle : ToolType.circle,
       sequence: _takeNextSequence(),
@@ -1726,7 +1735,7 @@ class DrawingProvider extends ChangeNotifier {
   void _addStraightLine(Offset start, Offset end) {
     _lines.add(DrawnLine(
       [Point(start, _strokeWidth), Point(end, _strokeWidth)],
-      color: Colors.black,
+      color: currentStrokeColor,
       width: _strokeWidth,
       tool: ToolType.line,
       sequence: _takeNextSequence(),
@@ -1750,7 +1759,7 @@ class DrawingProvider extends ChangeNotifier {
     }
     _lines.add(DrawnLine(
       points,
-      color: Colors.black,
+      color: currentStrokeColor,
       width: _strokeWidth,
       tool: ToolType.dot30, // density encoded in points; tool not critical
       sequence: _takeNextSequence(),
@@ -2011,6 +2020,7 @@ class DrawingProvider extends ChangeNotifier {
       fontSize: fontSize,
       vertical: vertical,
       maxWidth: canvasSize.width,
+      color: currentStrokeColor,
     );
     final Rect baseRect = Rect.fromLTWH(
       (canvasSize.width - textImage.width.toDouble()) / 2,
@@ -2039,6 +2049,7 @@ class DrawingProvider extends ChangeNotifier {
     required double fontSize,
     required bool vertical,
     required double maxWidth,
+    required Color color,
   }) async {
     final int paddingPx = _textSelectionPaddingPixels(fontSize);
     final Future<ui.Image> renderFuture = vertical
@@ -2046,6 +2057,7 @@ class DrawingProvider extends ChangeNotifier {
             text: text,
             fontFamily: fontFamily,
             fontSize: fontSize,
+            color: color,
           )
         : _buildHorizontalTextImage(
             text: text,
@@ -2053,6 +2065,7 @@ class DrawingProvider extends ChangeNotifier {
             fontFamily: fontFamily,
             fontSize: fontSize,
             maxWidth: math.max(1.0, maxWidth - (paddingPx * 2)),
+            color: color,
           );
     final ui.Image renderedText = await renderFuture;
     return _padImageWithTransparentMargin(
@@ -2067,6 +2080,7 @@ class DrawingProvider extends ChangeNotifier {
     required String? fontFamily,
     required double fontSize,
     required double maxWidth,
+    required Color color,
   }) async {
     if (context != null) {
       final Widget horizontalText = ConstrainedBox(
@@ -2076,7 +2090,7 @@ class DrawingProvider extends ChangeNotifier {
           textAlign: TextAlign.start,
           softWrap: true,
           style: TextStyle(
-            color: Colors.black,
+            color: color,
             fontSize: fontSize,
             height: _horizontalTextLineHeight,
             fontFamily: fontFamily,
@@ -2093,7 +2107,7 @@ class DrawingProvider extends ChangeNotifier {
       text: TextSpan(
         text: text,
         style: TextStyle(
-          color: Colors.black,
+          color: color,
           fontSize: fontSize,
           height: _horizontalTextLineHeight,
           fontFamily: fontFamily,
@@ -2154,6 +2168,7 @@ class DrawingProvider extends ChangeNotifier {
     required String text,
     required String? fontFamily,
     required double fontSize,
+    required Color color,
   }) async {
     final List<String> lines = text.split('\n');
     final List<_VerticalTextColumn> columns = <_VerticalTextColumn>[];
@@ -2191,7 +2206,7 @@ class DrawingProvider extends ChangeNotifier {
           text: TextSpan(
             text: glyph,
             style: TextStyle(
-              color: Colors.black,
+              color: color,
               fontSize: fontSize,
               height: 1.0,
               fontFamily: fontFamily,
