@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
@@ -38,12 +39,22 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   bool _ignoreDrawingGestures = false;
   int? _activeSelectionPointer;
   int? _activeDrawPointer;
+  ui.PointerDeviceKind? _activeDrawPointerKind;
   int? _activeSecondaryPointer;
   Offset? _pendingDrawStart;
   bool _activeDrawStarted = false;
+  final Set<int> _suppressedTouchPointers = <int>{};
+  Timer? _strokeResumeTimer;
+  DateTime? _strokeResumeDeadline;
+  Offset? _strokeResumeAnchor;
+  ToolType? _strokeResumeTool;
   DateTime? _lastFlipTime;
   Offset? _tapDownPosition;
   static const Duration _flipDebounceDuration = Duration(milliseconds: 500);
+  static const Duration _strokeResumeGraceDuration =
+      Duration(milliseconds: 700);
+  static const double _strokeResumeDistanceThreshold = 42.0;
+  static const double _palmRadiusThreshold = 24.0;
   //もっと長い距離をかけて細くしたい場合は、以下の定数を大きくします。
   static const double _minHandleDistance = 60.0; // 入り
   static const double _rotationSoftRadius = 80.0; // 抜き（払い）は特にながく
@@ -82,9 +93,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   onPanCancel: () => _handlePanEnd(drawing),
                   child: CustomPaint(
                     painter: DrawingPainter(
-                      layerALines: drawing.layerALines,
-                      layerBLines: drawing.layerBLines,
-                      layerCLines: drawing.layerCLines,
+                      allLines: drawing.lines,
                       isLayerAVisible: drawing.isLayerAVisible,
                       isLayerBVisible: drawing.isLayerBVisible,
                       isLayerCVisible: drawing.isLayerCVisible,
@@ -110,6 +119,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       currentTool: drawing.currentTool,
                       shapeStart: drawing.shapeStart,
                       shapeEnd: drawing.shapeEnd,
+                      canvasRevision: drawing.canvasRevision,
                       canvasSize: logicalSize,
                       canvasVisualOffset: widget.canvasVisualOffset,
                     ),
@@ -124,7 +134,145 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     );
   }
 
+  @override
+  void dispose() {
+    _strokeResumeTimer?.cancel();
+    super.dispose();
+  }
+
   bool get _isTwoFingerTouchActive => _activeTouchPoints.length >= 2;
+  bool get _hasPendingStrokeResume => _strokeResumeDeadline != null;
+
+  bool _supportsStrokeResume(ToolType tool) {
+    return tool == ToolType.pen ||
+        tool == ToolType.pressure ||
+        tool == ToolType.eraser ||
+        tool == ToolType.tone30 ||
+        tool == ToolType.tone60 ||
+        tool == ToolType.tone80;
+  }
+
+  bool _usesPalmRejection(DrawingProvider drawing) {
+    return _supportsStrokeResume(drawing.currentTool);
+  }
+
+  bool _isLikelyPalmTouch(PointerEvent event) {
+    if (event.kind != ui.PointerDeviceKind.touch) return false;
+    final double major = event.radiusMajor;
+    final double minor = event.radiusMinor;
+    if (major >= _palmRadiusThreshold || minor >= _palmRadiusThreshold) {
+      return true;
+    }
+    return major > 0 &&
+        minor > 0 &&
+        (major * minor) >= (_palmRadiusThreshold * 14.0);
+  }
+
+  void _clearStrokeResumeState() {
+    _strokeResumeTimer?.cancel();
+    _strokeResumeTimer = null;
+    _strokeResumeDeadline = null;
+    _strokeResumeAnchor = null;
+    _strokeResumeTool = null;
+  }
+
+  void _finalizePendingStrokeResume(DrawingProvider drawing) {
+    if (!_hasPendingStrokeResume || _activeDrawPointer != null) return;
+    _clearStrokeResumeState();
+    if (_activeDrawStarted) {
+      drawing.endLine();
+    }
+    _activeDrawStarted = false;
+    _lastOffset = null;
+    _pendingDrawStart = null;
+    _activeDrawPointerKind = null;
+    _syncIgnoreDrawingGestures();
+  }
+
+  void _scheduleStrokeResume(PointerEvent event, DrawingProvider drawing) {
+    _clearStrokeResumeState();
+    _strokeResumeDeadline = DateTime.now().add(_strokeResumeGraceDuration);
+    _strokeResumeAnchor = _lastOffset ??
+        _toCanvasPosition(
+          event.position,
+          fallbackLocal: event.localPosition,
+        );
+    _strokeResumeTool = drawing.currentTool;
+    _activeDrawPointerKind = event.kind;
+    _strokeResumeTimer = Timer(_strokeResumeGraceDuration, () {
+      if (!mounted) return;
+      _finalizePendingStrokeResume(drawing);
+    });
+    _syncIgnoreDrawingGestures();
+  }
+
+  bool _isResumeCandidate(PointerDownEvent event, DrawingProvider drawing) {
+    if (!_hasPendingStrokeResume ||
+        !_supportsStrokeResume(drawing.currentTool) ||
+        _strokeResumeTool != drawing.currentTool) {
+      return false;
+    }
+    final DateTime? deadline = _strokeResumeDeadline;
+    if (deadline == null || DateTime.now().isAfter(deadline)) {
+      return false;
+    }
+    final Offset pos = _toCanvasPosition(
+      event.position,
+      fallbackLocal: event.localPosition,
+    );
+    final Offset? anchor = _strokeResumeAnchor;
+    return anchor != null &&
+        _isInsideCanvas(pos) &&
+        (pos - anchor).distance <= _strokeResumeDistanceThreshold;
+  }
+
+  bool _tryResumeStroke(PointerDownEvent event, DrawingProvider drawing) {
+    if (!_isResumeCandidate(event, drawing)) {
+      if (_hasPendingStrokeResume &&
+          (!_supportsStrokeResume(drawing.currentTool) ||
+              _strokeResumeTool != drawing.currentTool)) {
+        _finalizePendingStrokeResume(drawing);
+      }
+      return false;
+    }
+    final pos = _toCanvasPosition(
+      event.position,
+      fallbackLocal: event.localPosition,
+    );
+
+    _clearStrokeResumeState();
+    _activeDrawPointer = event.pointer;
+    _activeDrawPointerKind = event.kind;
+    _activeDrawStarted = true;
+    _pendingDrawStart = null;
+    if (_lastOffset != null && (pos - _lastOffset!).distance >= 0.5) {
+      drawing.addPoint(pos, _lastOffset!);
+    }
+    _lastOffset = pos;
+    _syncIgnoreDrawingGestures();
+    return true;
+  }
+
+  bool _shouldSuppressTouchPointer(
+    PointerDownEvent event,
+    DrawingProvider drawing,
+  ) {
+    if (!_usesPalmRejection(drawing) ||
+        event.kind != ui.PointerDeviceKind.touch) {
+      return false;
+    }
+    if (_isLikelyPalmTouch(event)) {
+      return true;
+    }
+    if (_isResumeCandidate(event, drawing)) {
+      return false;
+    }
+    if (_activeDrawPointer != null || _hasPendingStrokeResume) {
+      return true;
+    }
+    return _activeDrawPointerKind == ui.PointerDeviceKind.stylus ||
+        _activeDrawPointerKind == ui.PointerDeviceKind.invertedStylus;
+  }
 
   Offset _twoFingerFocalPoint() {
     final points = _activeTouchPoints.values.take(2).toList(growable: false);
@@ -140,9 +288,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _cancelDrawingForTwoFinger(DrawingProvider drawing) {
+    _clearStrokeResumeState();
     _dragState = null;
     _lastOffset = null;
     _activeDrawPointer = null;
+    _activeDrawPointerKind = null;
     _pendingDrawStart = null;
     _activeDrawStarted = false;
     drawing.cancelActiveInputGesture();
@@ -167,13 +317,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     return fallbackLocal ?? globalPosition;
   }
 
+  // キャンバス端の描画を許可するため、微小な余裕（epsilon）を持たせる
+  static const double _canvasEdgeEpsilon = 0.001;
+
   bool _isInsideCanvas(Offset position) {
     final Size size = _canvasSize ?? widget.logicalCanvasSize ?? Size.zero;
     if (size == Size.zero) return false;
-    return position.dx >= 0 &&
-        position.dy >= 0 &&
-        position.dx <= size.width &&
-        position.dy <= size.height;
+    return position.dx >= -_canvasEdgeEpsilon &&
+        position.dy >= -_canvasEdgeEpsilon &&
+        position.dx <= size.width + _canvasEdgeEpsilon &&
+        position.dy <= size.height + _canvasEdgeEpsilon;
   }
 
   bool _isShapeTool(ToolType tool) {
@@ -227,7 +380,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     final bool shouldIgnore = _isTwoFingerTouchActive ||
         _activeSecondaryPointer != null ||
         _activeSelectionPointer != null ||
-        _activeDrawPointer != null;
+        _activeDrawPointer != null ||
+        _hasPendingStrokeResume;
     if (_ignoreDrawingGestures == shouldIgnore) return;
     setState(() {
       _ignoreDrawingGestures = shouldIgnore;
@@ -291,11 +445,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     if (drawing.currentTool == ToolType.lasso && drawing.selection != null) {
       return false;
     }
+    if (_tryResumeStroke(event, drawing)) {
+      return true;
+    }
     final pos = _toCanvasPosition(
       event.position,
       fallbackLocal: event.localPosition,
     );
+    _clearStrokeResumeState();
     _activeDrawPointer = event.pointer;
+    _activeDrawPointerKind = event.kind;
     _lastOffset = _isInsideCanvas(pos) ? pos : null;
     _pendingDrawStart = _isInsideCanvas(pos) ? pos : null;
     _activeDrawStarted = false;
@@ -308,6 +467,21 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _handlePointerDown(PointerDownEvent event, DrawingProvider drawing) {
+    if (_suppressedTouchPointers.contains(event.pointer)) {
+      return;
+    }
+
+    if (_hasPendingStrokeResume &&
+        _activeDrawPointer == null &&
+        !_isResumeCandidate(event, drawing)) {
+      _finalizePendingStrokeResume(drawing);
+    }
+
+    if (_shouldSuppressTouchPointer(event, drawing)) {
+      _suppressedTouchPointers.add(event.pointer);
+      return;
+    }
+
     if (event.kind == ui.PointerDeviceKind.touch) {
       _activeTouchPoints[event.pointer] = event.position;
       if (_isTwoFingerTouchActive) {
@@ -340,6 +514,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _handlePointerMove(PointerMoveEvent event, DrawingProvider drawing) {
+    if (_suppressedTouchPointers.contains(event.pointer)) {
+      return;
+    }
+
     if (_activeSecondaryPointer == event.pointer) {
       if (!_isSecondaryMouseGesture(event)) {
         _activeSecondaryPointer = null;
@@ -436,6 +614,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   }
 
   void _handlePointerUpOrCancel(PointerEvent event, DrawingProvider drawing) {
+    if (_suppressedTouchPointers.remove(event.pointer)) {
+      _activeTouchPoints.remove(event.pointer);
+      return;
+    }
+
     if (_activeSecondaryPointer == event.pointer) {
       _activeSecondaryPointer = null;
     }
@@ -451,13 +634,25 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           drawing.finishLasso(_canvasSize!);
         }
         _dragState = null;
+        _activeDrawStarted = false;
+        _lastOffset = null;
+        _clearStrokeResumeState();
+        _activeDrawPointerKind = null;
       } else if (_activeDrawStarted) {
-        drawing.endLine();
+        if (event is! PointerCancelEvent &&
+            _supportsStrokeResume(drawing.currentTool)) {
+          _scheduleStrokeResume(event, drawing);
+        } else {
+          drawing.endLine();
+          _activeDrawStarted = false;
+          _lastOffset = null;
+          _activeDrawPointerKind = null;
+        }
+      } else {
+        _activeDrawPointerKind = null;
       }
       _activeDrawPointer = null;
       _pendingDrawStart = null;
-      _activeDrawStarted = false;
-      _lastOffset = null;
     }
 
     _activeTouchPoints.remove(event.pointer);
@@ -474,7 +669,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   void _handleTapDown(TapDownDetails details) {
     if (_activeSecondaryPointer != null ||
         _activeSelectionPointer != null ||
-        _activeDrawPointer != null) {
+        _activeDrawPointer != null ||
+        _hasPendingStrokeResume) {
       _tapDownPosition = null;
       return;
     }
@@ -522,6 +718,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     if (_activeDrawPointer != null) {
       return;
     }
+    if (_hasPendingStrokeResume) {
+      _lastOffset = null;
+      return;
+    }
     if (_activeSelectionPointer != null) {
       _lastOffset = null;
       return;
@@ -565,6 +765,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     if (_isTwoFingerTouchActive) return;
     if (_activeSecondaryPointer != null) return;
     if (_activeDrawPointer != null) return;
+    if (_hasPendingStrokeResume) return;
     if (_activeSelectionPointer != null) return;
     final pos = _toCanvasPosition(
       details.globalPosition,
@@ -598,6 +799,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       return;
     }
     if (_activeDrawPointer != null) {
+      return;
+    }
+    if (_hasPendingStrokeResume) {
+      _dragState = null;
+      _lastOffset = null;
       return;
     }
     if (_activeSelectionPointer != null) {
@@ -757,9 +963,7 @@ class SelectionDragState {
 }
 
 class DrawingPainter extends CustomPainter {
-  final List<DrawnLine> layerALines;
-  final List<DrawnLine> layerBLines;
-  final List<DrawnLine> layerCLines;
+  final List<DrawnLine> allLines;
   final bool isLayerAVisible;
   final bool isLayerBVisible;
   final bool isLayerCVisible;
@@ -785,13 +989,12 @@ class DrawingPainter extends CustomPainter {
   final ToolType currentTool;
   final Offset? shapeStart;
   final Offset? shapeEnd;
+  final int canvasRevision;
   final Size canvasSize;
   final Offset canvasVisualOffset;
 
   DrawingPainter({
-    required this.layerALines,
-    required this.layerBLines,
-    required this.layerCLines,
+    required this.allLines,
     required this.isLayerAVisible,
     required this.isLayerBVisible,
     required this.isLayerCVisible,
@@ -817,6 +1020,7 @@ class DrawingPainter extends CustomPainter {
     required this.currentTool,
     required this.shapeStart,
     required this.shapeEnd,
+    required this.canvasRevision,
     required this.canvasSize,
     required this.canvasVisualOffset,
   });
@@ -884,18 +1088,20 @@ class DrawingPainter extends CustomPainter {
         DrawingLayer.layerB => layerBOpacity,
         DrawingLayer.layerC => layerCOpacity,
       };
-      if (selectionVisible && selectionOpacity > 0) {
-        canvas.saveLayer(
-          Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
-          Paint()..color = Colors.white.withValues(alpha: selectionOpacity),
-        );
-        _paintSelection(
-          canvas,
-          selection!,
-        );
-        canvas.restore();
-        _paintSelectionOverlay(canvas, selection!, handles);
-      }
+      final double previewOpacity =
+          selectionVisible && selectionOpacity > 0 ? selectionOpacity : 1.0;
+      // Keep the floating selection visible even when its source layer is
+      // hidden, otherwise the lasso appears to stop working.
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
+        Paint()..color = Colors.white.withValues(alpha: previewOpacity),
+      );
+      _paintSelection(
+        canvas,
+        selection!,
+      );
+      canvas.restore();
+      _paintSelectionOverlay(canvas, selection!, handles);
     }
     if (isDrawingLasso && lassoDraft.length > 1) {
       _drawLassoDraft(canvas);
@@ -942,21 +1148,13 @@ class DrawingPainter extends CustomPainter {
     canvas.restore();
   }
 
-  List<DrawnLine> _allLinesSortedBySequence() {
-    final List<DrawnLine> all = <DrawnLine>[
-      ...layerALines,
-      ...layerBLines,
-      ...layerCLines,
-    ]..sort((DrawnLine a, DrawnLine b) => a.sequence.compareTo(b.sequence));
-    return all;
-  }
 
   void _paintCommittedPlacementsForLayer(Canvas canvas, DrawingLayer layer) {
     LayerCompositePainter.paintSourceContentsUpTo(
       canvas,
       layer,
       kLayerCompositeMaxSequence,
-      allLines: _allLinesSortedBySequence(),
+      allLines: allLines,
       allPlacements: placements,
       layerABaseImage: layerABaseImage,
       layerBBaseImage: layerBBaseImage,
@@ -977,7 +1175,7 @@ class DrawingPainter extends CustomPainter {
     LayerCompositePainter.paintLassoSelection(
       canvas,
       selection,
-      allLines: _allLinesSortedBySequence(),
+      allLines: allLines,
       allPlacements: placements,
       layerABaseImage: layerABaseImage,
       layerBBaseImage: layerBBaseImage,
@@ -1119,6 +1317,49 @@ class DrawingPainter extends CustomPainter {
     }
   }
 
+  bool _shouldRepaintFromSnapshots(DrawingPainter oldDelegate) {
+    return canvasRevision != oldDelegate.canvasRevision ||
+        canvasSize != oldDelegate.canvasSize ||
+        canvasVisualOffset != oldDelegate.canvasVisualOffset;
+  }
+
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(covariant DrawingPainter oldDelegate) {
+    return _shouldRepaintFromSnapshots(oldDelegate);
+/*
+    // データが変更された場合のみ再描画（ソート済みリストの内容も比較）
+    if (layerALines.length != oldDelegate.layerALines.length ||
+        layerBLines.length != oldDelegate.layerBLines.length ||
+        layerCLines.length != oldDelegate.layerCLines.length ||
+        placements.length != oldDelegate.placements.length ||
+        isDrawingLasso != oldDelegate.isDrawingLasso ||
+        lassoDraft.length != oldDelegate.lassoDraft.length ||
+        selection?.translation != oldDelegate.selection?.translation ||
+        selection?.rotation != oldDelegate.selection?.rotation ||
+        selection?.scaleX != oldDelegate.selection?.scaleX ||
+        selection?.scaleY != oldDelegate.selection?.scaleY ||
+        shapeStart != oldDelegate.shapeStart ||
+        shapeEnd != oldDelegate.shapeEnd ||
+        currentTool != oldDelegate.currentTool ||
+        isLayerAVisible != oldDelegate.isLayerAVisible ||
+        isLayerBVisible != oldDelegate.isLayerBVisible ||
+        isLayerCVisible != oldDelegate.isLayerCVisible ||
+        layerAOpacity != oldDelegate.layerAOpacity ||
+        layerBOpacity != oldDelegate.layerBOpacity ||
+        layerCOpacity != oldDelegate.layerCOpacity ||
+        layerABaseImage != oldDelegate.layerABaseImage ||
+        layerBBaseImage != oldDelegate.layerBBaseImage ||
+        layerCBaseImage != oldDelegate.layerCBaseImage) {
+      return true;
+    }
+    // リスト内容が変わった場合も再描画が必要
+    for (int i = 0; i < _allLinesSorted.length; i++) {
+      if (i >= oldDelegate._allLinesSorted.length ||
+          _allLinesSorted[i] != oldDelegate._allLinesSorted[i]) {
+        return true;
+      }
+    }
+    return false;
+*/
+  }
 }

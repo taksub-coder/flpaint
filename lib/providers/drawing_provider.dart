@@ -164,6 +164,7 @@ class DrawingProvider extends ChangeNotifier {
   bool _backupDirectoriesReady = false;
   Timer? _autosaveTimer;
   bool _backupBusy = false;
+  int _canvasRevision = 0;
 
   List<DrawnLine> get lines => _lines;
   List<DrawnLine> get layerALines => List<DrawnLine>.unmodifiable(
@@ -206,6 +207,7 @@ class DrawingProvider extends ChangeNotifier {
   bool get selectionHandlesFilled => _selectionHandlesFilled;
   Offset? get shapeStart => _shapeStart;
   Offset? get shapeEnd => _shapeEnd;
+  int get canvasRevision => _canvasRevision;
 
   // Pen dynamics constants
   static const double _jitterDistanceThreshold = 2.4;
@@ -303,6 +305,12 @@ class DrawingProvider extends ChangeNotifier {
     super.dispose();
   }
 
+  @override
+  void notifyListeners() {
+    _canvasRevision++;
+    super.notifyListeners();
+  }
+
   void setCanvasSize(Size size) {
     if (_canvasSize == size) return;
     _canvasSize = size;
@@ -344,8 +352,17 @@ class DrawingProvider extends ChangeNotifier {
     });
   }
 
+  bool get _hasTransientCanvasActivity =>
+      _currentLine != null ||
+      _isDrawingLasso ||
+      _shapeStart != null ||
+      _shapeEnd != null;
+
   Future<void> _runAutosaveBackupSafely() async {
     try {
+      if (_backupBusy || _hasTransientCanvasActivity) {
+        return;
+      }
       await saveAutosaveBackup();
     } catch (_) {
       // Ignore autosave errors and keep drawing responsive.

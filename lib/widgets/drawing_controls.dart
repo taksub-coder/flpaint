@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/drawing.dart';
@@ -30,6 +31,8 @@ class DrawingControls extends StatelessWidget {
                       min: 1,
                       max: 30,
                       divisions: 29,
+                      showTickMarks: true,
+                      enableStepFeedback: true,
                       onChanged: drawing.setPenStrokeWidth,
                     ),
                     const SizedBox(height: 2),
@@ -136,7 +139,7 @@ class DrawingControls extends StatelessWidget {
   }
 }
 
-class _SliderRow extends StatelessWidget {
+class _SliderRow extends StatefulWidget {
   final String symbol;
   final double value;
   final double min;
@@ -144,6 +147,8 @@ class _SliderRow extends StatelessWidget {
   final int divisions;
   final ValueChanged<double> onChanged;
   final String? valueText;
+  final bool showTickMarks;
+  final bool enableStepFeedback;
 
   const _SliderRow({
     required this.symbol,
@@ -153,10 +158,29 @@ class _SliderRow extends StatelessWidget {
     required this.divisions,
     required this.onChanged,
     this.valueText,
+    this.showTickMarks = false,
+    this.enableStepFeedback = false,
   });
 
   @override
+  State<_SliderRow> createState() => _SliderRowState();
+}
+
+class _SliderRowState extends State<_SliderRow> {
+  int? _lastFeedbackStep;
+
+  void _handleChanged(double value) {
+    final int currentStep = value.round();
+    if (widget.enableStepFeedback && _lastFeedbackStep != currentStep) {
+      _lastFeedbackStep = currentStep;
+      HapticFeedback.selectionClick();
+    }
+    widget.onChanged(value);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    _lastFeedbackStep ??= widget.value.round();
     return SizedBox(
       height: 36,
       child: Row(
@@ -164,7 +188,7 @@ class _SliderRow extends StatelessWidget {
           SizedBox(
             width: 14,
             child: Text(
-              symbol,
+              widget.symbol,
               style: const TextStyle(
                   fontSize: 14, color: Color(0xFF6F6A22), height: 1.0),
             ),
@@ -172,17 +196,22 @@ class _SliderRow extends StatelessWidget {
           Expanded(
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
-                trackHeight: 2,
+                trackHeight: 3,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                tickMarkShape: widget.showTickMarks
+                    ? const RoundSliderTickMarkShape(tickMarkRadius: 1.5)
+                    : SliderTickMarkShape.noTickMark,
+                activeTickMarkColor: Colors.black,
+                inactiveTickMarkColor: Colors.black26,
                 overlayShape: SliderComponentShape.noOverlay,
               ),
               child: Slider(
-                value: value.clamp(min, max).toDouble(),
-                min: min,
-                max: max,
-                divisions: divisions,
-                label: (valueText ?? value.toStringAsFixed(0)),
-                onChanged: onChanged,
+                value: widget.value.clamp(widget.min, widget.max).toDouble(),
+                min: widget.min,
+                max: widget.max,
+                divisions: widget.divisions,
+                label: (widget.valueText ?? widget.value.toStringAsFixed(0)),
+                onChanged: _handleChanged,
               ),
             ),
           ),
@@ -191,7 +220,7 @@ class _SliderRow extends StatelessWidget {
             child: SizedBox(
               width: 32,
               child: Text(
-                valueText ?? value.toStringAsFixed(1),
+                widget.valueText ?? widget.value.toStringAsFixed(1),
                 textAlign: TextAlign.right,
                 style: const TextStyle(fontSize: 12),
               ),
