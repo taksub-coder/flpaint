@@ -1,8 +1,7 @@
-//flpaint_プロンプト2.1_BK実装と小文字21_インポート修正Ver
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:provider/provider.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'providers/drawing_provider.dart';
@@ -16,30 +15,27 @@ bool get _isDesktopPlatform =>
         defaultTargetPlatform == TargetPlatform.linux ||
         defaultTargetPlatform == TargetPlatform.macOS);
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (_isDesktopPlatform) {
-    // window_manager の初期化
     await windowManager.ensureInitialized();
-
-    // ウィンドウオプションを設定
-    WindowOptions windowOptions = const WindowOptions(
+    const WindowOptions windowOptions = WindowOptions(
       minimumSize: Size(480, 800),
-      maximumSize: Size(3000, 3000), // 必要に応じて大きく
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
-      title: 'flpaint_プロンプト2.1_BK実装と小文字21_インポート修正ver',
-      // 必要に応じて windowButtonVisibility: false, などを追加可能
+      title:
+          'flpaint_\u30d7\u30ed\u30f3\u30d7\u30c82.1_BK\u5b9f\u88c5\u3068\u5c0f\u658721_\u30a4\u30f3\u30dd\u30fc\u30c8\u4fee\u6b63ver',
     );
-
-    // ウィンドウを表示・フォーカスするまで待機
     windowManager.waitUntilReadyToShow(windowOptions, () async {
-      // 起動時に最大化して、画面サイズにフィットさせる
-      await windowManager.maximize();
-      await windowManager.setMinimumSize(const Size(480, 800));
-      await windowManager.show();
-      await windowManager.focus();
+      try {
+        await windowManager.setMinimumSize(const Size(480, 800));
+        await windowManager.show();
+        await windowManager.focus();
+        await windowManager.maximize();
+      } catch (_) {
+        await windowManager.show();
+      }
     });
   }
 
@@ -57,7 +53,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'flpaint_プロトタイプ2.1',
+      title: 'flpaint_\u30d7\u30ed\u30c8\u30bf\u30a4\u30d72.1',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,
@@ -77,9 +73,11 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   static const double _canvasViewportPadding = 500.0;
+
   final TransformationController _transformationController =
       TransformationController();
   final GlobalKey _interactiveViewerKey = GlobalKey();
+
   bool _panelSecondaryPointerDown = false;
   bool _panelPanZoomTracking = false;
   bool _suspendInteractiveViewerGestures = false;
@@ -88,16 +86,27 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       _alignToTopLeft();
+      context.read<DrawingProvider>().warmUp();
     });
   }
 
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
+  }
+
   void _alignToTopLeft() {
-    // スケール1.0で左上に寄せる（翻訳を0にセット）
     _transformationController.value = Matrix4.identity()
-      ..translate(
-          -_canvasViewportPadding, -_canvasViewportPadding) // 左上座標を(0,0)に固定
-      ..scale(1.0); // スケールは1.0（キャンバス原寸）
+      ..translateByDouble(
+        -_canvasViewportPadding,
+        -_canvasViewportPadding,
+        0.0,
+        1.0,
+      )
+      ..scaleByDouble(1.0, 1.0, 1.0, 1.0);
   }
 
   void _onCanvasTwoFingerPan(Offset delta) {
@@ -147,12 +156,6 @@ class _MyHomePageState extends State<MyHomePage> {
         const Offset(_canvasViewportPadding, _canvasViewportPadding);
   }
 
-  @override
-  void dispose() {
-    _transformationController.dispose();
-    super.dispose();
-  }
-
   void _onPanelPointerDown(PointerDownEvent event) {
     if (!_isDesktopPlatform) return;
     _panelSecondaryPointerDown = (event.buttons & kSecondaryMouseButton) != 0;
@@ -162,8 +165,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _onPanelPointerMove(PointerMoveEvent event) {
-    if (!_isDesktopPlatform) return;
-    if (!_panelSecondaryPointerDown) return;
+    if (!_isDesktopPlatform || !_panelSecondaryPointerDown) return;
     if ((event.buttons & kSecondaryMouseButton) == 0) {
       _panelSecondaryPointerDown = false;
       return;
@@ -182,8 +184,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _onPanelPanZoomUpdate(PointerPanZoomUpdateEvent event) {
-    if (!_isDesktopPlatform) return;
-    if (!_panelPanZoomTracking) return;
+    if (!_isDesktopPlatform || !_panelPanZoomTracking) return;
     final delta = event.panDelta;
     if (delta == Offset.zero) return;
     windowManager.getPosition().then((position) {
@@ -223,19 +224,22 @@ class _MyHomePageState extends State<MyHomePage> {
         preferredSize: const Size.fromHeight(kToolbarHeight),
         child: _buildWindowMovablePanel(
           child: AppBar(
-            title: const Text('FLPaint プロトタイプ2.1'),
+            title:
+                const Text('FLPaint \u30d7\u30ed\u30c8\u30bf\u30a4\u30d72.1'),
             actions: [
               IconButton(
-                  icon: const Icon(Icons.undo),
-                  onPressed: drawingProvider.undo),
+                icon: const Icon(Icons.undo),
+                onPressed: drawingProvider.undo,
+              ),
               IconButton(
-                  icon: const Icon(Icons.redo),
-                  onPressed: drawingProvider.redo),
+                icon: const Icon(Icons.redo),
+                onPressed: drawingProvider.redo,
+              ),
               IconButton(
                 icon: const Icon(Icons.clear),
                 onPressed: () {
                   drawingProvider.clear();
-                  _alignToTopLeft(); // クリア時も左上にリセット
+                  _alignToTopLeft();
                 },
               ),
             ],
@@ -248,10 +252,9 @@ class _MyHomePageState extends State<MyHomePage> {
             Expanded(
               child: Row(
                 children: [
-                  // キャンバスエリア
                   Expanded(
                     child: Container(
-                      color: const Color(0xFF404040), // キャンバス外：ダークグレー
+                      color: const Color(0xFF404040),
                       child: InteractiveViewer(
                         key: _interactiveViewerKey,
                         constrained: false,
@@ -268,22 +271,9 @@ class _MyHomePageState extends State<MyHomePage> {
                           child: Stack(
                             clipBehavior: Clip.none,
                             children: [
-                              Padding(
-                                padding: const EdgeInsets.all(
-                                    _canvasViewportPadding), // 広大な余白でズームアウト対応
-                                child: Container(
-                                  width: 768,
-                                  height: 1024,
-                                  decoration: const BoxDecoration(
-                                    color: Colors.white,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black54,
-                                        blurRadius: 20,
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              const Padding(
+                                padding: EdgeInsets.all(_canvasViewportPadding),
+                                child: _CanvasSheet(),
                               ),
                               Positioned.fill(
                                 child: DrawingCanvas(
@@ -294,8 +284,9 @@ class _MyHomePageState extends State<MyHomePage> {
                                       _onSelectionHandleInteractionChanged,
                                   logicalCanvasSize: const Size(768, 1024),
                                   canvasVisualOffset: const Offset(
-                                      _canvasViewportPadding,
-                                      _canvasViewportPadding),
+                                    _canvasViewportPadding,
+                                    _canvasViewportPadding,
+                                  ),
                                 ),
                               ),
                             ],
@@ -304,7 +295,6 @@ class _MyHomePageState extends State<MyHomePage> {
                       ),
                     ),
                   ),
-                  // 固定サイドバー
                   _buildWindowMovablePanel(
                     child: Container(
                       width: 70,
@@ -319,7 +309,6 @@ class _MyHomePageState extends State<MyHomePage> {
                 ],
               ),
             ),
-            // 固定スライダーパネル
             _buildWindowMovablePanel(
               child: Container(
                 width: double.infinity,
@@ -328,9 +317,10 @@ class _MyHomePageState extends State<MyHomePage> {
                   color: Colors.white,
                   boxShadow: [
                     BoxShadow(
-                        color: Colors.black.withAlpha(20),
-                        blurRadius: 4,
-                        offset: const Offset(0, -2))
+                      color: Colors.black.withAlpha(20),
+                      blurRadius: 4,
+                      offset: const Offset(0, -2),
+                    ),
                   ],
                 ),
                 child: const DrawingControls(),
@@ -338,6 +328,27 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _CanvasSheet extends StatelessWidget {
+  const _CanvasSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 768,
+      height: 1024,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black54,
+            blurRadius: 20,
+          ),
+        ],
       ),
     );
   }

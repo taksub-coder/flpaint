@@ -14,6 +14,7 @@ class _LayerCompositeFrameCache {
     required this.revision,
     required this.linesByLayer,
     required this.placementsByLayer,
+    required this.requiresIsolationByLayer,
   });
 
   final List<DrawnLine> allLines;
@@ -21,6 +22,7 @@ class _LayerCompositeFrameCache {
   final int revision;
   final Map<DrawingLayer, List<DrawnLine>> linesByLayer;
   final Map<DrawingLayer, List<LayerPlacement>> placementsByLayer;
+  final Map<DrawingLayer, bool> requiresIsolationByLayer;
 }
 
 /// Shared layer compositing for on-screen paint, export, and vector lasso replay.
@@ -106,13 +108,28 @@ class LayerCompositePainter {
       for (final DrawingLayer layer in DrawingLayer.values)
         layer: <LayerPlacement>[],
     };
+    final Map<DrawingLayer, bool> requiresIsolationByLayer =
+        <DrawingLayer, bool>{
+      for (final DrawingLayer layer in DrawingLayer.values) layer: false,
+    };
     for (final LayerPlacement placement in allPlacements) {
       final DrawingLayer? sourceLayer = placement.sourceLayer;
       if (sourceLayer != null) {
         placementsByLayer[sourceLayer]!.add(placement);
+        if (placement.sourceMaskPath != null) {
+          requiresIsolationByLayer[sourceLayer] = true;
+        }
       }
       if (placement.targetLayer != sourceLayer) {
         placementsByLayer[placement.targetLayer]!.add(placement);
+      }
+      if (placement.isVectorPlacement) {
+        requiresIsolationByLayer[placement.targetLayer] = true;
+      }
+    }
+    for (final DrawnLine line in allLines) {
+      if (line.isEraser) {
+        requiresIsolationByLayer[line.layer] = true;
       }
     }
 
@@ -122,9 +139,41 @@ class LayerCompositePainter {
       revision: revision,
       linesByLayer: linesByLayer,
       placementsByLayer: placementsByLayer,
+      requiresIsolationByLayer: requiresIsolationByLayer,
     );
     _frameCache = nextCache;
     return nextCache;
+  }
+
+  static bool layerRequiresIsolation(
+    DrawingLayer layer, {
+    required List<DrawnLine> allLines,
+    required List<LayerPlacement> allPlacements,
+    int? cacheRevision,
+  }) {
+    if (cacheRevision != null) {
+      final _LayerCompositeFrameCache cache = _resolveFrameCache(
+        allLines: allLines,
+        allPlacements: allPlacements,
+        revision: cacheRevision,
+      );
+      return cache.requiresIsolationByLayer[layer] ?? false;
+    }
+
+    for (final DrawnLine line in allLines) {
+      if (line.layer == layer && line.isEraser) {
+        return true;
+      }
+    }
+    for (final LayerPlacement placement in allPlacements) {
+      if (placement.sourceLayer == layer && placement.sourceMaskPath != null) {
+        return true;
+      }
+      if (placement.targetLayer == layer && placement.isVectorPlacement) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Paints one layer's base bitmap + interleaved lines/placements up to [maxSequence].

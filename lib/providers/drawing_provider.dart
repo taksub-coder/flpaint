@@ -169,6 +169,10 @@ class DrawingProvider extends ChangeNotifier {
   int _layerContentRevision = 0;
   int _lastAutosavedCanvasRevision = 0;
   DateTime? _lastCanvasChangeAt;
+  bool _warmUpStarted = false;
+  bool _backupInitializationStarted = false;
+  bool _toneShadersInitializing = false;
+  bool _toneShadersReady = false;
 
   List<DrawnLine> get lines => _lines;
   List<DrawnLine> get layerALines => List<DrawnLine>.unmodifiable(
@@ -300,10 +304,7 @@ class DrawingProvider extends ChangeNotifier {
   DateTime? _lastPointTime;
   double _lastSpeed = 0.0; // px/ms for current stroke
 
-  DrawingProvider() {
-    _initializeToneShaders();
-    unawaited(_initializeBackupSystem());
-  }
+  DrawingProvider();
 
   @override
   void dispose() {
@@ -322,6 +323,19 @@ class DrawingProvider extends ChangeNotifier {
   void setCanvasSize(Size size) {
     if (_canvasSize == size) return;
     _canvasSize = size;
+  }
+
+  void warmUp() {
+    if (_warmUpStarted) return;
+    _warmUpStarted = true;
+    unawaited(_ensureToneShadersInitialized());
+    unawaited(_initializeBackupSystemIfNeeded());
+  }
+
+  Future<void> _initializeBackupSystemIfNeeded() async {
+    if (_backupInitializationStarted) return;
+    _backupInitializationStarted = true;
+    await _initializeBackupSystem();
   }
 
   Future<void> _initializeBackupSystem() async {
@@ -403,6 +417,19 @@ class DrawingProvider extends ChangeNotifier {
     _autosaveRetryTimer = Timer(delay, () {
       unawaited(_runAutosaveBackupSafely());
     });
+  }
+
+  Future<void> _ensureToneShadersInitialized() async {
+    if (_toneShadersReady || _toneShadersInitializing) {
+      return;
+    }
+    _toneShadersInitializing = true;
+    try {
+      await _initializeToneShaders();
+      _toneShadersReady = true;
+    } finally {
+      _toneShadersInitializing = false;
+    }
   }
 
   Future<void> _initializeToneShaders() async {
@@ -495,6 +522,11 @@ class DrawingProvider extends ChangeNotifier {
       _terminateLassoSession();
     }
     _tool = tool;
+    if (tool == ToolType.tone30 ||
+        tool == ToolType.tone60 ||
+        tool == ToolType.tone80) {
+      unawaited(_ensureToneShadersInitialized());
+    }
     if (tool != ToolType.eraser) {
       _nextEraserFullErase = false;
     }

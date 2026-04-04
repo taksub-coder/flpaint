@@ -1097,7 +1097,8 @@ class DrawingPainter extends CustomPainter {
           selectionVisible && selectionOpacity > 0 ? selectionOpacity : 1.0;
       // Keep the floating selection visible even when its source layer is
       // hidden, otherwise the lasso appears to stop working.
-      final bool needsSelectionLayer = previewOpacity < 1.0;
+      final bool needsSelectionLayer =
+          previewOpacity < 1.0 || selection!.isVectorSelection;
       if (needsSelectionLayer) {
         canvas.saveLayer(
           canvasBounds,
@@ -1132,7 +1133,14 @@ class DrawingPainter extends CustomPainter {
     Path? holePath,
   }) {
     if (!isVisible || opacity <= 0) return;
-    final bool needsIsolatedLayer = holePath != null || opacity < 1.0;
+    final bool needsIsolatedLayer = holePath != null ||
+        opacity < 1.0 ||
+        LayerCompositePainter.layerRequiresIsolation(
+          layer,
+          allLines: allLines,
+          allPlacements: placements,
+          cacheRevision: layerContentRevision,
+        );
     if (needsIsolatedLayer) {
       canvas.saveLayer(
         Rect.fromLTWH(0, 0, size.width, size.height),
