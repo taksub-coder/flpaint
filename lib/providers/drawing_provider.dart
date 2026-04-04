@@ -1663,7 +1663,11 @@ class DrawingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void addPoint(Offset point, Offset lastPoint) {
+  void addPoint(
+    Offset point,
+    Offset lastPoint, {
+    bool preserveExactPoint = false,
+  }) {
     if (_isShapeTool(_tool)) {
       _shapeEnd = point;
       notifyListeners();
@@ -1679,7 +1683,8 @@ class DrawingProvider extends ChangeNotifier {
     // ボコボコ防止（0.5px以下の微細な動きを無視）
     if (distanceToLast < 0.5) return;
 
-    final smoothedOffset = _smoothOffset(point);
+    final Offset smoothedOffset =
+        preserveExactPoint ? point : _smoothOffset(point);
 
     // 速度計算
     final now = DateTime.now();

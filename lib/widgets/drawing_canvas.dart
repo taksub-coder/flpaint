@@ -146,15 +146,18 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   bool _supportsStrokeResume(ToolType tool) {
     return tool == ToolType.pen ||
-        tool == ToolType.pressure ||
-        tool == ToolType.eraser ||
         tool == ToolType.tone30 ||
         tool == ToolType.tone60 ||
         tool == ToolType.tone80;
   }
 
   bool _usesPalmRejection(DrawingProvider drawing) {
-    return _supportsStrokeResume(drawing.currentTool);
+    return drawing.currentTool == ToolType.pen ||
+        drawing.currentTool == ToolType.pressure ||
+        drawing.currentTool == ToolType.eraser ||
+        drawing.currentTool == ToolType.tone30 ||
+        drawing.currentTool == ToolType.tone60 ||
+        drawing.currentTool == ToolType.tone80;
   }
 
   bool _isLikelyPalmTouch(PointerEvent event) {
@@ -566,7 +569,15 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           if (lastInside != null) {
             final Offset? edgePoint = _canvasExitIntersection(lastInside, pos);
             if (edgePoint != null) {
-              drawing.addPoint(edgePoint, lastInside);
+              if (!_activeDrawStarted) {
+                drawing.startNewLine(_pendingDrawStart ?? lastInside);
+                _activeDrawStarted = true;
+              }
+              drawing.addPoint(
+                edgePoint,
+                lastInside,
+                preserveExactPoint: true,
+              );
               _lastOffset = edgePoint;
             }
           }
