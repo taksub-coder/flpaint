@@ -268,9 +268,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     if (_isResumeCandidate(event, drawing)) {
       return false;
     }
-    if (_activeDrawPointer != null || _hasPendingStrokeResume) {
-      return true;
-    }
     return _activeDrawPointerKind == ui.PointerDeviceKind.stylus ||
         _activeDrawPointerKind == ui.PointerDeviceKind.invertedStylus;
   }
@@ -380,9 +377,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   void _syncIgnoreDrawingGestures() {
     final bool shouldIgnore = _isTwoFingerTouchActive ||
         _activeSecondaryPointer != null ||
-        _activeSelectionPointer != null ||
-        _activeDrawPointer != null ||
-        _hasPendingStrokeResume;
+        _activeSelectionPointer != null;
     if (_ignoreDrawingGestures == shouldIgnore) return;
     setState(() {
       _ignoreDrawingGestures = shouldIgnore;
@@ -483,7 +478,17 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       return;
     }
 
-    if (event.kind == ui.PointerDeviceKind.touch) {
+    final bool resumeTouchCandidate =
+        event.kind == ui.PointerDeviceKind.touch &&
+            _isResumeCandidate(event, drawing);
+
+    if (resumeTouchCandidate) {
+      _activeTouchPoints
+        ..clear()
+        ..[event.pointer] = event.position;
+      _lastTwoFingerFocalPoint = null;
+      _lastTwoFingerDistance = null;
+    } else if (event.kind == ui.PointerDeviceKind.touch) {
       _activeTouchPoints[event.pointer] = event.position;
       if (_isTwoFingerTouchActive) {
         _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
