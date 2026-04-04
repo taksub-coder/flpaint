@@ -163,8 +163,12 @@ class DrawingProvider extends ChangeNotifier {
   Directory? _autosaveBackupDirectory;
   bool _backupDirectoriesReady = false;
   Timer? _autosaveTimer;
+  Timer? _autosaveRetryTimer;
   bool _backupBusy = false;
   int _canvasRevision = 0;
+  int _layerContentRevision = 0;
+  int _lastAutosavedCanvasRevision = 0;
+  DateTime? _lastCanvasChangeAt;
 
   List<DrawnLine> get lines => _lines;
   List<DrawnLine> get layerALines => List<DrawnLine>.unmodifiable(
@@ -176,8 +180,7 @@ class DrawingProvider extends ChangeNotifier {
   List<DrawnLine> get layerCLines => List<DrawnLine>.unmodifiable(
         _lines.where((line) => line.layer == DrawingLayer.layerC),
       );
-  List<LayerPlacement> get placements =>
-      List<LayerPlacement>.unmodifiable(_placements);
+  List<LayerPlacement> get placements => _placements;
   double get strokeWidth => _strokeWidth;
   double get eraserWidth => _eraserWidth;
   ToolType get currentTool => _tool;
@@ -208,6 +211,7 @@ class DrawingProvider extends ChangeNotifier {
   Offset? get shapeStart => _shapeStart;
   Offset? get shapeEnd => _shapeEnd;
   int get canvasRevision => _canvasRevision;
+  int get layerContentRevision => _layerContentRevision;
 
   // Pen dynamics constants
   static const double _jitterDistanceThreshold = 2.4;
@@ -220,6 +224,8 @@ class DrawingProvider extends ChangeNotifier {
   static const double _pressureTaperOutBase = 14.0;
   static const Size _ioCanvasSize = Size(768, 1024);
   static const Duration _autosaveInterval = Duration(minutes: 5);
+  static const Duration _autosaveIdleThreshold = Duration(seconds: 20);
+  static const Duration _autosaveRetryDelay = Duration(seconds: 30);
   static const List<DrawingLayer> _backupLayers = <DrawingLayer>[
     DrawingLayer.layerA,
     DrawingLayer.layerB,
@@ -302,12 +308,14 @@ class DrawingProvider extends ChangeNotifier {
   @override
   void dispose() {
     _autosaveTimer?.cancel();
+    _autosaveRetryTimer?.cancel();
     super.dispose();
   }
 
   @override
   void notifyListeners() {
     _canvasRevision++;
+    _lastCanvasChangeAt = DateTime.now();
     super.notifyListeners();
   }
 
@@ -348,7 +356,7 @@ class DrawingProvider extends ChangeNotifier {
   void _startAutosaveTimer() {
     _autosaveTimer?.cancel();
     _autosaveTimer = Timer.periodic(_autosaveInterval, (_) {
-      unawaited(_runAutosaveBackupSafely());
+      _scheduleAutosaveRetry();
     });
   }
 
@@ -360,13 +368,41 @@ class DrawingProvider extends ChangeNotifier {
 
   Future<void> _runAutosaveBackupSafely() async {
     try {
+      if (_canvasRevision == _lastAutosavedCanvasRevision) {
+        return;
+      }
       if (_backupBusy || _hasTransientCanvasActivity) {
+        _scheduleAutosaveRetry(const Duration(seconds: 5));
+        return;
+      }
+      final DateTime? lastChangeAt = _lastCanvasChangeAt;
+      if (lastChangeAt != null) {
+        final Duration idleTime = DateTime.now().difference(lastChangeAt);
+        if (idleTime < _autosaveIdleThreshold) {
+          _scheduleAutosaveRetry(_autosaveIdleThreshold - idleTime);
+          return;
+        }
+      }
+      final int revisionAtStart = _canvasRevision;
+      if (revisionAtStart == _lastAutosavedCanvasRevision) {
         return;
       }
       await saveAutosaveBackup();
+      _lastAutosavedCanvasRevision = revisionAtStart;
+      _autosaveRetryTimer?.cancel();
     } catch (_) {
       // Ignore autosave errors and keep drawing responsive.
+      _scheduleAutosaveRetry();
     }
+  }
+
+  void _scheduleAutosaveRetry([
+    Duration delay = _autosaveRetryDelay,
+  ]) {
+    _autosaveRetryTimer?.cancel();
+    _autosaveRetryTimer = Timer(delay, () {
+      unawaited(_runAutosaveBackupSafely());
+    });
   }
 
   Future<void> _initializeToneShaders() async {
@@ -565,6 +601,7 @@ class DrawingProvider extends ChangeNotifier {
     _lassoPoints.clear();
     _isDrawingLasso = false;
     _resetSelectionState();
+    _markLayerContentChanged();
     notifyListeners();
   }
 
@@ -1058,6 +1095,7 @@ class DrawingProvider extends ChangeNotifier {
     _shapeStart = null;
     _shapeEnd = null;
     _resetSelectionState();
+    _markLayerContentChanged();
     notifyListeners();
   }
 
@@ -1225,6 +1263,7 @@ class DrawingProvider extends ChangeNotifier {
     _layerCBaseSampling = RasterSamplingMode.pixelated;
     _shapeStart = null;
     _shapeEnd = null;
+    _markLayerContentChanged();
     notifyListeners();
   }
 
@@ -1303,7 +1342,15 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   void _clearLayerLines(DrawingLayer layer) {
+    final int before = _lines.length;
     _lines.removeWhere((line) => line.layer == layer);
+    if (_lines.length != before) {
+      _markLayerContentChanged();
+    }
+  }
+
+  void _markLayerContentChanged() {
+    _layerContentRevision++;
   }
 
   void _resetSelectionState() {
@@ -1460,6 +1507,7 @@ class DrawingProvider extends ChangeNotifier {
     _selectionMasksSource = snapshot.selectionMasksSource;
     _selectionHandlesFilled = snapshot.selectionHandlesFilled;
     _selectionMergeToActiveLayer = snapshot.selectionMergeToActiveLayer;
+    _markLayerContentChanged();
   }
 
   DrawnLine _cloneLine(DrawnLine src) {
@@ -1579,6 +1627,7 @@ class DrawingProvider extends ChangeNotifier {
       layer: _activeLayer,
     );
     _lines.add(_currentLine!);
+    _markLayerContentChanged();
     notifyListeners();
   }
 
@@ -1667,6 +1716,7 @@ class DrawingProvider extends ChangeNotifier {
     _lines.remove(_currentLine);
     _currentLine = null;
     _lineStartPoint = null;
+    _markLayerContentChanged();
     notifyListeners();
   }
 
@@ -1683,6 +1733,7 @@ class DrawingProvider extends ChangeNotifier {
       _lines.remove(_currentLine);
       _currentLine = null;
       _lineStartPoint = null;
+      _markLayerContentChanged();
       changed = true;
     }
 
@@ -1759,6 +1810,7 @@ class DrawingProvider extends ChangeNotifier {
       layer: _activeLayer,
       shapeRect: rect,
     ));
+    _markLayerContentChanged();
   }
 
   void _addCircle(Rect rect, {required bool fill}) {
@@ -1774,6 +1826,7 @@ class DrawingProvider extends ChangeNotifier {
       layer: _activeLayer,
       shapeRect: rect,
     ));
+    _markLayerContentChanged();
   }
 
   void _addStraightLine(Offset start, Offset end) {
@@ -1788,6 +1841,7 @@ class DrawingProvider extends ChangeNotifier {
       isFinished: true,
       layer: _activeLayer,
     ));
+    _markLayerContentChanged();
   }
 
   void _addDotPattern(Rect rect, {required double density}) {
@@ -1812,6 +1866,7 @@ class DrawingProvider extends ChangeNotifier {
       isFinished: true,
       layer: _activeLayer,
     ));
+    _markLayerContentChanged();
   }
 
   int _maxLayerContentSequence(DrawingLayer layer) {
@@ -2596,6 +2651,7 @@ class DrawingProvider extends ChangeNotifier {
       ),
     );
     _resetSelectionState();
+    _markLayerContentChanged();
     notifyListeners();
   }
 
@@ -2619,6 +2675,7 @@ class DrawingProvider extends ChangeNotifier {
       tone30Shader: _tone30Shader,
       tone60Shader: _tone60Shader,
       tone80Shader: _tone80Shader,
+      cacheRevision: _layerContentRevision,
     );
   }
 
@@ -2649,6 +2706,7 @@ class DrawingProvider extends ChangeNotifier {
       tone30Shader: _tone30Shader,
       tone60Shader: _tone60Shader,
       tone80Shader: _tone80Shader,
+      cacheRevision: _layerContentRevision,
     );
   }
 }

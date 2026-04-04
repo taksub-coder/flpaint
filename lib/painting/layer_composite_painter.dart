@@ -7,9 +7,27 @@ import '../models/drawing.dart';
 /// Upper bound for "paint everything" when merging layer timelines.
 const int kLayerCompositeMaxSequence = 2000000000;
 
+class _LayerCompositeFrameCache {
+  const _LayerCompositeFrameCache({
+    required this.allLines,
+    required this.allPlacements,
+    required this.revision,
+    required this.linesByLayer,
+    required this.placementsByLayer,
+  });
+
+  final List<DrawnLine> allLines;
+  final List<LayerPlacement> allPlacements;
+  final int revision;
+  final Map<DrawingLayer, List<DrawnLine>> linesByLayer;
+  final Map<DrawingLayer, List<LayerPlacement>> placementsByLayer;
+}
+
 /// Shared layer compositing for on-screen paint, export, and vector lasso replay.
 class LayerCompositePainter {
   LayerCompositePainter._();
+
+  static _LayerCompositeFrameCache? _frameCache;
 
   static ui.Image? _baseForLayer(
     DrawingLayer layer, {
@@ -61,6 +79,54 @@ class LayerCompositePainter {
     }
   }
 
+  static _LayerCompositeFrameCache _resolveFrameCache({
+    required List<DrawnLine> allLines,
+    required List<LayerPlacement> allPlacements,
+    required int revision,
+  }) {
+    final _LayerCompositeFrameCache? cached = _frameCache;
+    if (cached != null &&
+        identical(cached.allLines, allLines) &&
+        identical(cached.allPlacements, allPlacements) &&
+        cached.revision == revision) {
+      return cached;
+    }
+
+    final Map<DrawingLayer, List<DrawnLine>> linesByLayer =
+        <DrawingLayer, List<DrawnLine>>{
+      for (final DrawingLayer layer in DrawingLayer.values)
+        layer: <DrawnLine>[],
+    };
+    for (final DrawnLine line in allLines) {
+      linesByLayer[line.layer]!.add(line);
+    }
+
+    final Map<DrawingLayer, List<LayerPlacement>> placementsByLayer =
+        <DrawingLayer, List<LayerPlacement>>{
+      for (final DrawingLayer layer in DrawingLayer.values)
+        layer: <LayerPlacement>[],
+    };
+    for (final LayerPlacement placement in allPlacements) {
+      final DrawingLayer? sourceLayer = placement.sourceLayer;
+      if (sourceLayer != null) {
+        placementsByLayer[sourceLayer]!.add(placement);
+      }
+      if (placement.targetLayer != sourceLayer) {
+        placementsByLayer[placement.targetLayer]!.add(placement);
+      }
+    }
+
+    final _LayerCompositeFrameCache nextCache = _LayerCompositeFrameCache(
+      allLines: allLines,
+      allPlacements: allPlacements,
+      revision: revision,
+      linesByLayer: linesByLayer,
+      placementsByLayer: placementsByLayer,
+    );
+    _frameCache = nextCache;
+    return nextCache;
+  }
+
   /// Paints one layer's base bitmap + interleaved lines/placements up to [maxSequence].
   static void paintSourceContentsUpTo(
     Canvas canvas,
@@ -77,6 +143,7 @@ class LayerCompositePainter {
     required ui.ImageShader? tone30Shader,
     required ui.ImageShader? tone60Shader,
     required ui.ImageShader? tone80Shader,
+    int? cacheRevision,
     int recursionDepth = 0,
   }) {
     if (recursionDepth > 48) {
@@ -107,13 +174,25 @@ class LayerCompositePainter {
       );
     }
 
-    final List<DrawnLine> layerLines = allLines
-        .where((DrawnLine line) => line.layer == layer)
-        .toList(growable: false);
-    final List<LayerPlacement> layerPlacements = allPlacements
-        .where((LayerPlacement placement) =>
-            placement.sourceLayer == layer || placement.targetLayer == layer)
-        .toList(growable: false);
+    final List<DrawnLine> layerLines;
+    final List<LayerPlacement> layerPlacements;
+    if (cacheRevision != null) {
+      final _LayerCompositeFrameCache cache = _resolveFrameCache(
+        allLines: allLines,
+        allPlacements: allPlacements,
+        revision: cacheRevision,
+      );
+      layerLines = cache.linesByLayer[layer]!;
+      layerPlacements = cache.placementsByLayer[layer]!;
+    } else {
+      layerLines = allLines
+          .where((DrawnLine line) => line.layer == layer)
+          .toList(growable: false);
+      layerPlacements = allPlacements
+          .where((LayerPlacement placement) =>
+              placement.sourceLayer == layer || placement.targetLayer == layer)
+          .toList(growable: false);
+    }
 
     int lineIndex = 0;
     int placementIndex = 0;
@@ -177,6 +256,7 @@ class LayerCompositePainter {
           tone30Shader: tone30Shader,
           tone60Shader: tone60Shader,
           tone80Shader: tone80Shader,
+          cacheRevision: cacheRevision,
           recursionDepth: recursionDepth,
         );
       }
@@ -198,6 +278,7 @@ class LayerCompositePainter {
     required ui.ImageShader? tone30Shader,
     required ui.ImageShader? tone60Shader,
     required ui.ImageShader? tone80Shader,
+    int? cacheRevision,
     int recursionDepth = 0,
   }) {
     if (placement.isVectorPlacement) {
@@ -224,6 +305,7 @@ class LayerCompositePainter {
         tone30Shader: tone30Shader,
         tone60Shader: tone60Shader,
         tone80Shader: tone80Shader,
+        cacheRevision: cacheRevision,
         recursionDepth: recursionDepth + 1,
       );
       canvas.restore();
@@ -266,6 +348,7 @@ class LayerCompositePainter {
     required ui.ImageShader? tone30Shader,
     required ui.ImageShader? tone60Shader,
     required ui.ImageShader? tone80Shader,
+    int? cacheRevision,
   }) {
     final ui.Image? raster = selection.rasterImage;
     if (raster != null) {
@@ -310,6 +393,7 @@ class LayerCompositePainter {
       tone30Shader: tone30Shader,
       tone60Shader: tone60Shader,
       tone80Shader: tone80Shader,
+      cacheRevision: cacheRevision,
       recursionDepth: 0,
     );
     canvas.restore();

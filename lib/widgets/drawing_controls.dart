@@ -10,6 +10,8 @@ class DrawingControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return const _DrawingControlsBody();
+/*
     return Consumer<DrawingProvider>(
       builder: (context, drawing, _) {
         final layerASliderValue = (1.0 - drawing.layerAOpacity) * 100.0;
@@ -135,6 +137,164 @@ class DrawingControls extends StatelessWidget {
           ),
         );
       },
+    );
+*/
+  }
+}
+
+class _DrawingControlsBody extends StatelessWidget {
+  const _DrawingControlsBody();
+
+  @override
+  Widget build(BuildContext context) {
+    final DrawingProvider drawing = context.read<DrawingProvider>();
+    final double strokeWidth = context.select<DrawingProvider, double>(
+      (drawing) => drawing.strokeWidth,
+    );
+    final double eraserWidth = context.select<DrawingProvider, double>(
+      (drawing) => drawing.eraserWidth,
+    );
+    final DrawingLayer activeLayer =
+        context.select<DrawingProvider, DrawingLayer>(
+      (drawing) => drawing.activeLayer,
+    );
+    final bool isLayerAVisible = context.select<DrawingProvider, bool>(
+      (drawing) => drawing.isLayerAVisible,
+    );
+    final bool isLayerBVisible = context.select<DrawingProvider, bool>(
+      (drawing) => drawing.isLayerBVisible,
+    );
+    final bool isLayerCVisible = context.select<DrawingProvider, bool>(
+      (drawing) => drawing.isLayerCVisible,
+    );
+    final double layerAOpacity = context.select<DrawingProvider, double>(
+      (drawing) => drawing.layerAOpacity,
+    );
+    final double layerBOpacity = context.select<DrawingProvider, double>(
+      (drawing) => drawing.layerBOpacity,
+    );
+    final double layerCOpacity = context.select<DrawingProvider, double>(
+      (drawing) => drawing.layerCOpacity,
+    );
+
+    final double layerASliderValue = (1.0 - layerAOpacity) * 100.0;
+    final double layerBSliderValue = (1.0 - layerBOpacity) * 100.0;
+    final double layerCSliderValue = (1.0 - layerCOpacity) * 100.0;
+
+    return SizedBox(
+      height: 118,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _SliderRow(
+                  symbol: 'P',
+                  value: strokeWidth,
+                  min: 1,
+                  max: 30,
+                  divisions: 29,
+                  showTickMarks: true,
+                  enableStepFeedback: true,
+                  onChanged: drawing.setPenStrokeWidth,
+                ),
+                const SizedBox(height: 2),
+                _SliderRow(
+                  symbol: 'E',
+                  value: eraserWidth,
+                  min: 1,
+                  max: 30,
+                  divisions: 29,
+                  onChanged: drawing.setEraserWidth,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 7),
+          SizedBox(
+            width: 112,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _LayerRowButtons(
+                  label: '繝ｬ繧､繝､繝ｼA',
+                  selected: activeLayer == DrawingLayer.layerA,
+                  visible: isLayerAVisible,
+                  onSelect: () => drawing.setActiveLayer(DrawingLayer.layerA),
+                  onToggleVisible: (value) =>
+                      drawing.setLayerVisibility(DrawingLayer.layerA, value),
+                ),
+                const SizedBox(height: 2),
+                _LayerRowButtons(
+                  label: '繝ｬ繧､繝､繝ｼB',
+                  selected: activeLayer == DrawingLayer.layerB,
+                  visible: isLayerBVisible,
+                  onSelect: () => drawing.setActiveLayer(DrawingLayer.layerB),
+                  onToggleVisible: (value) =>
+                      drawing.setLayerVisibility(DrawingLayer.layerB, value),
+                ),
+                const SizedBox(height: 2),
+                _LayerRowButtons(
+                  label: '繝ｬ繧､繝､繝ｼC',
+                  selected: activeLayer == DrawingLayer.layerC,
+                  visible: isLayerCVisible,
+                  onSelect: () => drawing.setActiveLayer(DrawingLayer.layerC),
+                  onToggleVisible: (value) =>
+                      drawing.setLayerVisibility(DrawingLayer.layerC, value),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _SliderRow(
+                  symbol: 'A',
+                  value: layerASliderValue,
+                  min: 0,
+                  max: 100,
+                  divisions: 100,
+                  onChanged: (value) => drawing.setLayerOpacity(
+                    DrawingLayer.layerA,
+                    1.0 - value / 100.0,
+                  ),
+                  valueText: '${(100.0 - layerASliderValue).round()}',
+                ),
+                const SizedBox(height: 2),
+                _SliderRow(
+                  symbol: 'B',
+                  value: layerBSliderValue,
+                  min: 0,
+                  max: 100,
+                  divisions: 100,
+                  onChanged: (value) => drawing.setLayerOpacity(
+                    DrawingLayer.layerB,
+                    1.0 - value / 100.0,
+                  ),
+                  valueText: '${(100.0 - layerBSliderValue).round()}',
+                ),
+                const SizedBox(height: 2),
+                _SliderRow(
+                  symbol: 'C',
+                  value: layerCSliderValue,
+                  min: 0,
+                  max: 100,
+                  divisions: 100,
+                  onChanged: (value) => drawing.setLayerOpacity(
+                    DrawingLayer.layerC,
+                    1.0 - value / 100.0,
+                  ),
+                  valueText: '${(100.0 - layerCSliderValue).round()}',
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

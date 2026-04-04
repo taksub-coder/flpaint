@@ -120,6 +120,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       shapeStart: drawing.shapeStart,
                       shapeEnd: drawing.shapeEnd,
                       canvasRevision: drawing.canvasRevision,
+                      layerContentRevision: drawing.layerContentRevision,
                       canvasSize: logicalSize,
                       canvasVisualOffset: widget.canvasVisualOffset,
                     ),
@@ -990,6 +991,7 @@ class DrawingPainter extends CustomPainter {
   final Offset? shapeStart;
   final Offset? shapeEnd;
   final int canvasRevision;
+  final int layerContentRevision;
   final Size canvasSize;
   final Offset canvasVisualOffset;
 
@@ -1021,6 +1023,7 @@ class DrawingPainter extends CustomPainter {
     required this.shapeStart,
     required this.shapeEnd,
     required this.canvasRevision,
+    required this.layerContentRevision,
     required this.canvasSize,
     required this.canvasVisualOffset,
   });
@@ -1032,6 +1035,8 @@ class DrawingPainter extends CustomPainter {
 
     canvas.save();
     canvas.translate(canvasVisualOffset.dx, canvasVisualOffset.dy);
+    final Rect canvasBounds =
+        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height);
 
     final Path? layerAHolePath = selectionMasksSource &&
             selection != null &&
@@ -1092,15 +1097,20 @@ class DrawingPainter extends CustomPainter {
           selectionVisible && selectionOpacity > 0 ? selectionOpacity : 1.0;
       // Keep the floating selection visible even when its source layer is
       // hidden, otherwise the lasso appears to stop working.
-      canvas.saveLayer(
-        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
-        Paint()..color = Colors.white.withValues(alpha: previewOpacity),
-      );
+      final bool needsSelectionLayer = previewOpacity < 1.0;
+      if (needsSelectionLayer) {
+        canvas.saveLayer(
+          canvasBounds,
+          Paint()..color = Colors.white.withValues(alpha: previewOpacity),
+        );
+      }
       _paintSelection(
         canvas,
         selection!,
       );
-      canvas.restore();
+      if (needsSelectionLayer) {
+        canvas.restore();
+      }
       _paintSelectionOverlay(canvas, selection!, handles);
     }
     if (isDrawingLasso && lassoDraft.length > 1) {
@@ -1122,10 +1132,13 @@ class DrawingPainter extends CustomPainter {
     Path? holePath,
   }) {
     if (!isVisible || opacity <= 0) return;
-    canvas.saveLayer(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..color = Colors.white.withValues(alpha: opacity),
-    );
+    final bool needsIsolatedLayer = holePath != null || opacity < 1.0;
+    if (needsIsolatedLayer) {
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, size.width, size.height),
+        Paint()..color = Colors.white.withValues(alpha: opacity),
+      );
+    }
     if (baseImage != null) {
       // FilterQuality.low で輪郭を維持し、元画像をグレースケール化せずそのまま表示（矩形描画時も同様）
       canvas.drawImage(
@@ -1145,9 +1158,10 @@ class DrawingPainter extends CustomPainter {
           ..isAntiAlias = false,
       );
     }
-    canvas.restore();
+    if (needsIsolatedLayer) {
+      canvas.restore();
+    }
   }
-
 
   void _paintCommittedPlacementsForLayer(Canvas canvas, DrawingLayer layer) {
     LayerCompositePainter.paintSourceContentsUpTo(
@@ -1165,6 +1179,7 @@ class DrawingPainter extends CustomPainter {
       tone30Shader: tone30Shader,
       tone60Shader: tone60Shader,
       tone80Shader: tone80Shader,
+      cacheRevision: layerContentRevision,
     );
   }
 
@@ -1186,6 +1201,7 @@ class DrawingPainter extends CustomPainter {
       tone30Shader: tone30Shader,
       tone60Shader: tone60Shader,
       tone80Shader: tone80Shader,
+      cacheRevision: layerContentRevision,
     );
   }
 
