@@ -117,8 +117,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       isDrawingLasso: drawing.isDrawingLasso,
                       handles: drawing.getSelectionHandles(),
                       currentTool: drawing.currentTool,
+                      currentStrokeWidth: drawing.strokeWidth,
                       shapeStart: drawing.shapeStart,
                       shapeEnd: drawing.shapeEnd,
+                      linesStartPointRatioA: drawing.linesStartPointRatioA,
+                      linesStartPointRatioB: drawing.linesStartPointRatioB,
+                      radialPreviewCenter: drawing.radialPreviewCenter,
+                      radialPreviewStartAngle: drawing.radialPreviewStartAngle,
+                      radialPreviewSweepAngle: drawing.radialPreviewSweepAngle,
+                      radialPreviewLineCount: drawing.radialPreviewLineCount,
+                      radialPreviewRadius: drawing.radialPreviewRadius,
                       canvasRevision: drawing.canvasRevision,
                       layerContentRevision: drawing.layerContentRevision,
                       canvasSize: logicalSize,
@@ -457,6 +465,19 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _lastOffset = _isInsideCanvas(pos) ? pos : null;
     _pendingDrawStart = _isInsideCanvas(pos) ? pos : null;
     _activeDrawStarted = false;
+    if (drawing.currentTool == ToolType.radial) {
+      if (!_isInsideCanvas(pos)) {
+        _activeDrawPointer = null;
+        _activeDrawPointerKind = null;
+        _lastOffset = null;
+        _pendingDrawStart = null;
+        return false;
+      }
+      drawing.startRadialPreview(pos);
+      _activeDrawStarted = true;
+      _syncIgnoreDrawingGestures();
+      return true;
+    }
     if (drawing.currentTool == ToolType.lasso && _isInsideCanvas(pos)) {
       drawing.startLasso(pos);
       _activeDrawStarted = true;
@@ -563,6 +584,20 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         } else {
           drawing.extendLasso(pos);
         }
+      } else if (drawing.currentTool == ToolType.radial) {
+        final Offset? center = _pendingDrawStart;
+        if (center == null) {
+          return;
+        }
+        if (!isInsideCanvas) {
+          final Offset? edgePoint = _canvasExitIntersection(center, pos);
+          if (edgePoint != null) {
+            drawing.updateRadialPreview(edgePoint);
+            _lastOffset = edgePoint;
+          }
+          return;
+        }
+        drawing.updateRadialPreview(pos);
       } else {
         if (!isInsideCanvas) {
           final Offset? lastInside = _lastOffset;
@@ -651,6 +686,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           drawing.finishLasso(_canvasSize!);
         }
         _dragState = null;
+        _activeDrawStarted = false;
+        _lastOffset = null;
+        _clearStrokeResumeState();
+        _activeDrawPointerKind = null;
+      } else if (drawing.currentTool == ToolType.radial) {
         _activeDrawStarted = false;
         _lastOffset = null;
         _clearStrokeResumeState();
@@ -979,6 +1019,18 @@ class SelectionDragState {
   });
 }
 
+class _RadialPreviewSegment {
+  final Offset start;
+  final Offset end;
+  final int groupIndex;
+
+  const _RadialPreviewSegment({
+    required this.start,
+    required this.end,
+    required this.groupIndex,
+  });
+}
+
 class DrawingPainter extends CustomPainter {
   final List<DrawnLine> allLines;
   final bool isLayerAVisible;
@@ -1004,8 +1056,16 @@ class DrawingPainter extends CustomPainter {
   final bool isDrawingLasso;
   final Map<SelectionHandle, Offset> handles;
   final ToolType currentTool;
+  final double currentStrokeWidth;
   final Offset? shapeStart;
   final Offset? shapeEnd;
+  final double linesStartPointRatioA;
+  final double linesStartPointRatioB;
+  final Offset? radialPreviewCenter;
+  final double? radialPreviewStartAngle;
+  final double radialPreviewSweepAngle;
+  final int radialPreviewLineCount;
+  final double radialPreviewRadius;
   final int canvasRevision;
   final int layerContentRevision;
   final Size canvasSize;
@@ -1036,8 +1096,16 @@ class DrawingPainter extends CustomPainter {
     required this.isDrawingLasso,
     required this.handles,
     required this.currentTool,
+    required this.currentStrokeWidth,
     required this.shapeStart,
     required this.shapeEnd,
+    required this.linesStartPointRatioA,
+    required this.linesStartPointRatioB,
+    required this.radialPreviewCenter,
+    required this.radialPreviewStartAngle,
+    required this.radialPreviewSweepAngle,
+    required this.radialPreviewLineCount,
+    required this.radialPreviewRadius,
     required this.canvasRevision,
     required this.layerContentRevision,
     required this.canvasSize,
@@ -1135,6 +1203,9 @@ class DrawingPainter extends CustomPainter {
     }
     if (_isShapeTool(currentTool) && shapeStart != null && shapeEnd != null) {
       _drawShapeGuide(canvas, currentTool, shapeStart!, shapeEnd!);
+    }
+    if (currentTool == ToolType.radial && radialPreviewCenter != null) {
+      _drawRadialPreview(canvas);
     }
     canvas.restore();
   }
@@ -1341,6 +1412,165 @@ class DrawingPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
     _drawDashedPath(canvas, path, paint);
+  }
+
+  void _drawRadialPreview(Canvas canvas) {
+    final Offset center = radialPreviewCenter!;
+    final Paint crossPaint = Paint()
+      ..color = const Color(0xFFFF4DB8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6;
+    canvas.drawLine(
+      center + const Offset(-8, -8),
+      center + const Offset(8, 8),
+      crossPaint,
+    );
+    canvas.drawLine(
+      center + const Offset(-8, 8),
+      center + const Offset(8, -8),
+      crossPaint,
+    );
+
+    if (radialPreviewRadius <= 0.0) {
+      return;
+    }
+
+    final Path radiusPath = Path()
+      ..addOval(
+        Rect.fromCircle(center: center, radius: radialPreviewRadius),
+      );
+    final Paint radiusPaint = Paint()
+      ..color = const Color(0x66FF4DB8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    _drawDashedPath(
+      canvas,
+      radiusPath,
+      radiusPaint,
+      dashLength: 7,
+      gapLength: 5,
+    );
+
+    final double? startAngle = radialPreviewStartAngle;
+    if (startAngle == null) {
+      return;
+    }
+
+    final double currentAngle = startAngle + (radialPreviewSweepAngle / 2.0);
+    final Offset currentPoint = _pointAlongAngle(
+      center,
+      currentAngle,
+      radialPreviewRadius,
+    );
+    canvas.drawLine(
+      center,
+      currentPoint,
+      Paint()
+        ..color = const Color(0xFF34C7FF)
+        ..strokeWidth = 1.4,
+    );
+
+    for (final _RadialPreviewSegment segment in _buildRadialPreviewSegments()) {
+      canvas.drawLine(
+        segment.start,
+        segment.end,
+        Paint()
+          ..color = switch (segment.groupIndex) {
+            0 => const Color(0xC0686830),
+            _ => const Color(0xA8686830),
+          }
+          ..strokeWidth = currentStrokeWidth.clamp(1.0, 30.0),
+      );
+    }
+  }
+
+  List<_RadialPreviewSegment> _buildRadialPreviewSegments() {
+    final Offset? center = radialPreviewCenter;
+    final double? startAngle = radialPreviewStartAngle;
+    if (center == null ||
+        startAngle == null ||
+        radialPreviewRadius <= 0.0 ||
+        radialPreviewLineCount <= 0) {
+      return const <_RadialPreviewSegment>[];
+    }
+
+    final List<_RadialPreviewSegment> segments = <_RadialPreviewSegment>[];
+    for (int index = 0; index < radialPreviewLineCount; index++) {
+      final double t = radialPreviewLineCount == 1
+          ? 0.0
+          : index / (radialPreviewLineCount - 1);
+      final double angle = startAngle + radialPreviewSweepAngle * t;
+      final int groupIndex = index % 2;
+      final double startRadius = radialPreviewRadius *
+          (1.0 - _radialVisibleLengthRatioForIndex(index));
+      final Offset end = _clampRayToCanvas(
+        center,
+        _pointAlongAngle(center, angle, radialPreviewRadius),
+      );
+      final double effectiveRadius = (end - center).distance;
+      if (effectiveRadius <= 0.0) {
+        continue;
+      }
+      final double clampedStartRadius =
+          startRadius.clamp(0.0, effectiveRadius).toDouble();
+      segments.add(
+        _RadialPreviewSegment(
+          start: _pointAlongAngle(center, angle, clampedStartRadius),
+          end: end,
+          groupIndex: groupIndex,
+        ),
+      );
+    }
+    return segments;
+  }
+
+  double _radialVisibleLengthRatioForIndex(int index) {
+    switch (index % 2) {
+      case 0:
+        return linesStartPointRatioA;
+      default:
+        return linesStartPointRatioB;
+    }
+  }
+
+  Offset _pointAlongAngle(Offset center, double angle, double radius) {
+    return Offset(
+      center.dx + math.cos(angle) * radius,
+      center.dy + math.sin(angle) * radius,
+    );
+  }
+
+  Offset _clampRayToCanvas(Offset inside, Offset candidate) {
+    final bool isInsideCanvasBounds = candidate.dx >= 0.0 &&
+        candidate.dy >= 0.0 &&
+        candidate.dx <= canvasSize.width &&
+        candidate.dy <= canvasSize.height;
+    if (isInsideCanvasBounds) {
+      return candidate;
+    }
+
+    final double dx = candidate.dx - inside.dx;
+    final double dy = candidate.dy - inside.dy;
+    if (dx == 0.0 && dy == 0.0) {
+      return inside;
+    }
+
+    double t = 1.0;
+    if (dx > 0.0) {
+      t = math.min(t, (canvasSize.width - inside.dx) / dx);
+    } else if (dx < 0.0) {
+      t = math.min(t, (0.0 - inside.dx) / dx);
+    }
+    if (dy > 0.0) {
+      t = math.min(t, (canvasSize.height - inside.dy) / dy);
+    } else if (dy < 0.0) {
+      t = math.min(t, (0.0 - inside.dy) / dy);
+    }
+
+    return Offset(
+      inside.dx + dx * t,
+      inside.dy + dy * t,
+    );
   }
 
   void _drawDashedPath(Canvas canvas, Path path, Paint paint,

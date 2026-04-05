@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 import 'providers/drawing_provider.dart';
 import 'widgets/drawing_canvas.dart';
 import 'widgets/drawing_controls.dart';
+import 'widgets/radial_tool_popup.dart';
 import 'widgets/tool_sidebar.dart';
 
 bool get _isDesktopPlatform =>
@@ -254,45 +255,60 @@ class _MyHomePageState extends State<MyHomePage> {
                   Expanded(
                     child: Container(
                       color: const Color(0xFF404040),
-                      child: InteractiveViewer(
-                        key: _interactiveViewerKey,
-                        constrained: false,
-                        boundaryMargin: const EdgeInsets.all(2000),
-                        minScale: 0.1,
-                        maxScale: 5.0,
-                        panEnabled: !_suspendInteractiveViewerGestures,
-                        scaleEnabled: !_suspendInteractiveViewerGestures,
-                        trackpadScrollCausesScale: true,
-                        transformationController: _transformationController,
-                        child: SizedBox(
-                          width: 768 + (_canvasViewportPadding * 2),
-                          height: 1024 + (_canvasViewportPadding * 2),
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              const Padding(
-                                padding: EdgeInsets.all(_canvasViewportPadding),
-                                child: _CanvasSheet(),
-                              ),
-                              Positioned.fill(
-                                child: RepaintBoundary(
-                                  child: DrawingCanvas(
-                                    onTwoFingerPan: _onCanvasTwoFingerPan,
-                                    onTwoFingerScale: _onCanvasTwoFingerScale,
-                                    toCanvas: _toCanvasPosition,
-                                    onSelectionHandleInteractionChanged:
-                                        _onSelectionHandleInteractionChanged,
-                                    logicalCanvasSize: const Size(768, 1024),
-                                    canvasVisualOffset: const Offset(
-                                      _canvasViewportPadding,
+                      child: Stack(
+                        children: [
+                          InteractiveViewer(
+                            key: _interactiveViewerKey,
+                            constrained: false,
+                            boundaryMargin: const EdgeInsets.all(2000),
+                            minScale: 0.1,
+                            maxScale: 5.0,
+                            panEnabled: !_suspendInteractiveViewerGestures,
+                            scaleEnabled: !_suspendInteractiveViewerGestures,
+                            trackpadScrollCausesScale: true,
+                            transformationController: _transformationController,
+                            child: SizedBox(
+                              width: 768 + (_canvasViewportPadding * 2),
+                              height: 1024 + (_canvasViewportPadding * 2),
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  const Padding(
+                                    padding: EdgeInsets.all(
                                       _canvasViewportPadding,
                                     ),
+                                    child: _CanvasSheet(),
                                   ),
-                                ),
+                                  Positioned.fill(
+                                    child: RepaintBoundary(
+                                      child: DrawingCanvas(
+                                        onTwoFingerPan: _onCanvasTwoFingerPan,
+                                        onTwoFingerScale:
+                                            _onCanvasTwoFingerScale,
+                                        toCanvas: _toCanvasPosition,
+                                        onSelectionHandleInteractionChanged:
+                                            _onSelectionHandleInteractionChanged,
+                                        logicalCanvasSize:
+                                            const Size(768, 1024),
+                                        canvasVisualOffset: const Offset(
+                                          _canvasViewportPadding,
+                                          _canvasViewportPadding,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
-                        ),
+                          const Positioned(
+                            top: 12,
+                            right: 12,
+                            child: RepaintBoundary(
+                              child: RadialToolPopup(),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),

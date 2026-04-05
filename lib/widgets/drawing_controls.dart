@@ -11,11 +11,22 @@ class DrawingControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final DrawingProvider drawing = context.read<DrawingProvider>();
+    final bool isLinesToolSelected = context.select<DrawingProvider, bool>(
+      (drawing) => drawing.isLinesToolSelected,
+    );
     final double strokeWidth = context.select<DrawingProvider, double>(
       (drawing) => drawing.strokeWidth,
     );
     final double eraserWidth = context.select<DrawingProvider, double>(
       (drawing) => drawing.eraserWidth,
+    );
+    final double linesStartPointRatioA =
+        context.select<DrawingProvider, double>(
+      (drawing) => drawing.linesStartPointRatioA,
+    );
+    final double linesStartPointRatioB =
+        context.select<DrawingProvider, double>(
+      (drawing) => drawing.linesStartPointRatioB,
     );
     final DrawingLayer activeLayer =
         context.select<DrawingProvider, DrawingLayer>(
@@ -43,121 +54,172 @@ class DrawingControls extends StatelessWidget {
     final double layerASliderValue = (1.0 - layerAOpacity) * 100.0;
     final double layerBSliderValue = (1.0 - layerBOpacity) * 100.0;
     final double layerCSliderValue = (1.0 - layerCOpacity) * 100.0;
-
-    return SizedBox(
-      height: 118,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+    final double radialSliderValueA = linesStartPointRatioA * 100.0;
+    final double radialSliderValueB = linesStartPointRatioB * 100.0;
+    final Widget layerButtons = SizedBox(
+      width: 112,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _SliderRow(
-                  symbol: 'P',
-                  value: strokeWidth,
-                  min: 1,
-                  max: 30,
-                  divisions: 29,
-                  showTickMarks: true,
-                  enableStepFeedback: true,
-                  onChanged: drawing.setPenStrokeWidth,
-                ),
-                const SizedBox(height: 2),
-                _SliderRow(
-                  symbol: 'E',
-                  value: eraserWidth,
-                  min: 1,
-                  max: 30,
-                  divisions: 29,
-                  onChanged: drawing.setEraserWidth,
-                ),
-              ],
-            ),
+          _LayerRowButtons(
+            label: '\u30ec\u30a4\u30e4\u30fcA',
+            selected: activeLayer == DrawingLayer.layerA,
+            visible: isLayerAVisible,
+            onSelect: () => drawing.setActiveLayer(DrawingLayer.layerA),
+            onToggleVisible: (value) =>
+                drawing.setLayerVisibility(DrawingLayer.layerA, value),
           ),
-          const SizedBox(width: 7),
-          SizedBox(
-            width: 112,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _LayerRowButtons(
-                  label: 'レイヤーA',
-                  selected: activeLayer == DrawingLayer.layerA,
-                  visible: isLayerAVisible,
-                  onSelect: () => drawing.setActiveLayer(DrawingLayer.layerA),
-                  onToggleVisible: (value) =>
-                      drawing.setLayerVisibility(DrawingLayer.layerA, value),
-                ),
-                const SizedBox(height: 2),
-                _LayerRowButtons(
-                  label: 'レイヤーB',
-                  selected: activeLayer == DrawingLayer.layerB,
-                  visible: isLayerBVisible,
-                  onSelect: () => drawing.setActiveLayer(DrawingLayer.layerB),
-                  onToggleVisible: (value) =>
-                      drawing.setLayerVisibility(DrawingLayer.layerB, value),
-                ),
-                const SizedBox(height: 2),
-                _LayerRowButtons(
-                  label: 'レイヤーC',
-                  selected: activeLayer == DrawingLayer.layerC,
-                  visible: isLayerCVisible,
-                  onSelect: () => drawing.setActiveLayer(DrawingLayer.layerC),
-                  onToggleVisible: (value) =>
-                      drawing.setLayerVisibility(DrawingLayer.layerC, value),
-                ),
-              ],
-            ),
+          const SizedBox(height: 2),
+          _LayerRowButtons(
+            label: '\u30ec\u30a4\u30e4\u30fcB',
+            selected: activeLayer == DrawingLayer.layerB,
+            visible: isLayerBVisible,
+            onSelect: () => drawing.setActiveLayer(DrawingLayer.layerB),
+            onToggleVisible: (value) =>
+                drawing.setLayerVisibility(DrawingLayer.layerB, value),
           ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _SliderRow(
-                  symbol: 'A',
-                  value: layerASliderValue,
-                  min: 0,
-                  max: 100,
-                  divisions: 100,
-                  onChanged: (value) => drawing.setLayerOpacity(
-                    DrawingLayer.layerA,
-                    1.0 - value / 100.0,
-                  ),
-                  valueText: '${(100.0 - layerASliderValue).round()}',
-                ),
-                const SizedBox(height: 2),
-                _SliderRow(
-                  symbol: 'B',
-                  value: layerBSliderValue,
-                  min: 0,
-                  max: 100,
-                  divisions: 100,
-                  onChanged: (value) => drawing.setLayerOpacity(
-                    DrawingLayer.layerB,
-                    1.0 - value / 100.0,
-                  ),
-                  valueText: '${(100.0 - layerBSliderValue).round()}',
-                ),
-                const SizedBox(height: 2),
-                _SliderRow(
-                  symbol: 'C',
-                  value: layerCSliderValue,
-                  min: 0,
-                  max: 100,
-                  divisions: 100,
-                  onChanged: (value) => drawing.setLayerOpacity(
-                    DrawingLayer.layerC,
-                    1.0 - value / 100.0,
-                  ),
-                  valueText: '${(100.0 - layerCSliderValue).round()}',
-                ),
-              ],
-            ),
+          const SizedBox(height: 2),
+          _LayerRowButtons(
+            label: '\u30ec\u30a4\u30e4\u30fcC',
+            selected: activeLayer == DrawingLayer.layerC,
+            visible: isLayerCVisible,
+            onSelect: () => drawing.setActiveLayer(DrawingLayer.layerC),
+            onToggleVisible: (value) =>
+                drawing.setLayerVisibility(DrawingLayer.layerC, value),
           ),
         ],
       ),
+    );
+
+    return SizedBox(
+      height: 118,
+      child: isLinesToolSelected
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _SliderRow(
+                        symbol: 'A\u7dda\u9577',
+                        labelWidth: 46,
+                        symbolStyle: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF6F6A22),
+                          height: 1.0,
+                        ),
+                        value: radialSliderValueA,
+                        min: 0,
+                        max: 100,
+                        divisions: 100,
+                        onChanged: (value) =>
+                            drawing.setLinesStartPointRatioA(value / 100.0),
+                        valueText: radialSliderValueA.round().toString(),
+                      ),
+                      const SizedBox(height: 2),
+                      _SliderRow(
+                        symbol: 'B\u7dda\u9577',
+                        labelWidth: 46,
+                        symbolStyle: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF6F6A22),
+                          height: 1.0,
+                        ),
+                        value: radialSliderValueB,
+                        min: 0,
+                        max: 100,
+                        divisions: 100,
+                        onChanged: (value) =>
+                            drawing.setLinesStartPointRatioB(value / 100.0),
+                        valueText: radialSliderValueB.round().toString(),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 7),
+                layerButtons,
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _SliderRow(
+                        symbol: 'P',
+                        value: strokeWidth,
+                        min: 1,
+                        max: 30,
+                        divisions: 29,
+                        showTickMarks: true,
+                        enableStepFeedback: true,
+                        onChanged: drawing.setPenStrokeWidth,
+                      ),
+                      const SizedBox(height: 2),
+                      _SliderRow(
+                        symbol: 'E',
+                        value: eraserWidth,
+                        min: 1,
+                        max: 30,
+                        divisions: 29,
+                        onChanged: drawing.setEraserWidth,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 7),
+                layerButtons,
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _SliderRow(
+                        symbol: 'A',
+                        value: layerASliderValue,
+                        min: 0,
+                        max: 100,
+                        divisions: 100,
+                        onChanged: (value) => drawing.setLayerOpacity(
+                          DrawingLayer.layerA,
+                          1.0 - value / 100.0,
+                        ),
+                        valueText: '${(100.0 - layerASliderValue).round()}',
+                      ),
+                      const SizedBox(height: 2),
+                      _SliderRow(
+                        symbol: 'B',
+                        value: layerBSliderValue,
+                        min: 0,
+                        max: 100,
+                        divisions: 100,
+                        onChanged: (value) => drawing.setLayerOpacity(
+                          DrawingLayer.layerB,
+                          1.0 - value / 100.0,
+                        ),
+                        valueText: '${(100.0 - layerBSliderValue).round()}',
+                      ),
+                      const SizedBox(height: 2),
+                      _SliderRow(
+                        symbol: 'C',
+                        value: layerCSliderValue,
+                        min: 0,
+                        max: 100,
+                        divisions: 100,
+                        onChanged: (value) => drawing.setLayerOpacity(
+                          DrawingLayer.layerC,
+                          1.0 - value / 100.0,
+                        ),
+                        valueText: '${(100.0 - layerCSliderValue).round()}',
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -172,6 +234,8 @@ class _SliderRow extends StatefulWidget {
   final String? valueText;
   final bool showTickMarks;
   final bool enableStepFeedback;
+  final double labelWidth;
+  final TextStyle? symbolStyle;
 
   const _SliderRow({
     required this.symbol,
@@ -183,6 +247,8 @@ class _SliderRow extends StatefulWidget {
     this.valueText,
     this.showTickMarks = false,
     this.enableStepFeedback = false,
+    this.labelWidth = 14,
+    this.symbolStyle,
   });
 
   @override
@@ -209,11 +275,17 @@ class _SliderRowState extends State<_SliderRow> {
       child: Row(
         children: [
           SizedBox(
-            width: 14,
+            width: widget.labelWidth,
             child: Text(
               widget.symbol,
-              style: const TextStyle(
-                  fontSize: 14, color: Color(0xFF6F6A22), height: 1.0),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: widget.symbolStyle ??
+                  const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF6F6A22),
+                    height: 1.0,
+                  ),
             ),
           ),
           Expanded(
@@ -233,7 +305,7 @@ class _SliderRowState extends State<_SliderRow> {
                 min: widget.min,
                 max: widget.max,
                 divisions: widget.divisions,
-                label: (widget.valueText ?? widget.value.toStringAsFixed(0)),
+                label: widget.valueText ?? widget.value.toStringAsFixed(0),
                 onChanged: _handleChanged,
               ),
             ),

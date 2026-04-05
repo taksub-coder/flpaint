@@ -91,6 +91,13 @@ class ToolSidebar extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             _ToolButton(
+              icon: Icons.flare,
+              tooltip: 'Radial lines',
+              selected: selected == ToolType.radial,
+              onTap: () => drawing.setTool(ToolType.radial),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
               label: '□',
               tooltip: 'Rectangle',
               selected: selected == ToolType.rect,

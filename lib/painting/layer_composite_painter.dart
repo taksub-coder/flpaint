@@ -513,6 +513,7 @@ class LayerCompositePainter {
         canvas.drawOval(line.shapeRect!, paint);
         return;
       case ToolType.line:
+      case ToolType.radial:
         if (line.points.length < 2) return;
         paint
           ..strokeWidth = line.points.first.width

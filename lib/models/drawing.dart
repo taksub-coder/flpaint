@@ -10,6 +10,7 @@ enum ToolType {
   fillRect,
   fillCircle,
   line,
+  radial,
   dot30,
   dot60,
   dot80,

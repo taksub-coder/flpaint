@@ -111,6 +111,16 @@ class _ClipboardVectorSpec {
   }) : maskPathCanvas = Path()..addPath(maskPathSource, Offset.zero);
 }
 
+class _RadialLineSegment {
+  final Offset start;
+  final Offset end;
+
+  const _RadialLineSegment({
+    required this.start,
+    required this.end,
+  });
+}
+
 class DrawingProvider extends ChangeNotifier {
   final List<DrawnLine> _lines = [];
   final List<LayerPlacement> _placements = [];
@@ -156,6 +166,14 @@ class DrawingProvider extends ChangeNotifier {
   // Shapes
   Offset? _shapeStart;
   Offset? _shapeEnd;
+  double _linesStartPointRatioA = 0.88;
+  double _linesStartPointRatioB = 0.72;
+  Offset? _radialPreviewCenter;
+  double? _radialPreviewStartAngle;
+  double _radialPreviewSweepAngle = 0.0;
+  double _radialPreviewRadius = 0.0;
+  int _radialPreviewLineCount = 0;
+  double _radialLineDensity = 45.0;
 
   // Undo / Redo
   final List<_DrawingSnapshot> _undoStack = [];
@@ -215,6 +233,46 @@ class DrawingProvider extends ChangeNotifier {
   bool get selectionHandlesFilled => _selectionHandlesFilled;
   Offset? get shapeStart => _shapeStart;
   Offset? get shapeEnd => _shapeEnd;
+  double get linesStartPointRatioA => _linesStartPointRatioA;
+  double get linesStartPointRatioB => _linesStartPointRatioB;
+  bool get isLinesToolSelected => _tool == ToolType.radial;
+  bool get hasRadialPreview => _radialPreviewCenter != null;
+  Offset? get radialPreviewCenter => _radialPreviewCenter;
+  double? get radialPreviewStartAngle => _radialPreviewStartAngle;
+  double? get radialPreviewCurrentAngle => _radialPreviewStartAngle == null
+      ? null
+      : _radialPreviewStartAngle! + (_radialPreviewSweepAngle / 2.0);
+  double get radialPreviewSweepAngle => _radialPreviewSweepAngle;
+  double get radialPreviewSweepDegrees =>
+      _radialPreviewSweepAngle.abs() * 180.0 / math.pi;
+  double get radialPreviewRadius => _radialPreviewRadius;
+  double get radialPreviewDiameter => _radialPreviewRadius * 2.0;
+  double get radialLineDensity => _radialLineDensity;
+  String get radialLineDensityLabel {
+    if (_radialLineDensity < 33.0) {
+      return '少';
+    }
+    if (_radialLineDensity < 66.0) {
+      return '中';
+    }
+    return '多';
+  }
+
+  double get radialPreviewMaxRadius {
+    final Size size = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    return math.sqrt(
+      (size.width * size.width) + (size.height * size.height),
+    );
+  }
+
+  double get radialPreviewMaxDiameter => radialPreviewMaxRadius * 2.0;
+
+  bool get canCommitRadialPreview =>
+      _radialPreviewCenter != null &&
+      _radialPreviewStartAngle != null &&
+      _radialPreviewRadius >= _minimumRadialRadius &&
+      _radialPreviewLineCount > 0;
+  int get radialPreviewLineCount => _radialPreviewLineCount;
   int get canvasRevision => _canvasRevision;
   int get layerContentRevision => _layerContentRevision;
 
@@ -233,6 +291,9 @@ class DrawingProvider extends ChangeNotifier {
   static const Duration _autosaveRetryDelay = Duration(seconds: 30);
   static const RasterSamplingMode _rasterImageSampling =
       RasterSamplingMode.smooth;
+  static const double _minimumRadialRadius = 2.0;
+  static const int _radialMinLineCount = 8;
+  static const int _radialMaxLineCount = 72;
   static const List<DrawingLayer> _backupLayers = <DrawingLayer>[
     DrawingLayer.layerA,
     DrawingLayer.layerB,
@@ -385,7 +446,8 @@ class DrawingProvider extends ChangeNotifier {
       _currentLine != null ||
       _isDrawingLasso ||
       _shapeStart != null ||
-      _shapeEnd != null;
+      _shapeEnd != null ||
+      _radialPreviewCenter != null;
 
   Future<void> _runAutosaveBackupSafely() async {
     try {
@@ -528,6 +590,9 @@ class DrawingProvider extends ChangeNotifier {
     if (tool != ToolType.lasso) {
       _terminateLassoSession();
     }
+    if (tool != ToolType.radial) {
+      _clearRadialPreviewState();
+    }
     _tool = tool;
     if (tool == ToolType.tone30 ||
         tool == ToolType.tone60 ||
@@ -555,6 +620,10 @@ class DrawingProvider extends ChangeNotifier {
       _terminateLassoSession();
     }
     _strokeWidth = width.clamp(1.0, 30.0).toDouble();
+    if (_tool == ToolType.radial && _radialPreviewCenter != null) {
+      notifyListeners();
+      return;
+    }
     _notifyUiOnly();
   }
 
@@ -566,10 +635,263 @@ class DrawingProvider extends ChangeNotifier {
     _notifyUiOnly();
   }
 
+  void setLinesStartPointRatioA(double value) {
+    final double clamped = value.clamp(0.0, 1.0).toDouble();
+    if (_linesStartPointRatioA == clamped) return;
+    _linesStartPointRatioA = clamped;
+    if (_tool == ToolType.radial && _radialPreviewCenter != null) {
+      notifyListeners();
+      return;
+    }
+    _notifyUiOnly();
+  }
+
+  void setLinesStartPointRatioB(double value) {
+    final double clamped = value.clamp(0.0, 1.0).toDouble();
+    if (_linesStartPointRatioB == clamped) return;
+    _linesStartPointRatioB = clamped;
+    if (_tool == ToolType.radial && _radialPreviewCenter != null) {
+      notifyListeners();
+      return;
+    }
+    _notifyUiOnly();
+  }
+
+  void setRadialLineDensity(double value) {
+    final double clamped = value.clamp(0.0, 100.0).toDouble();
+    if ((_radialLineDensity - clamped).abs() < 0.001) return;
+    _radialLineDensity = clamped;
+    if (_tool == ToolType.radial && _radialPreviewCenter != null) {
+      _radialPreviewLineCount = _configuredRadialLineCount;
+      notifyListeners();
+      return;
+    }
+    _notifyUiOnly();
+  }
+
+  void startRadialPreview(Offset center) {
+    _clearRadialPreviewState();
+    _radialPreviewCenter = center;
+    notifyListeners();
+  }
+
+  void updateRadialPreview(Offset currentPoint) {
+    final Offset? center = _radialPreviewCenter;
+    if (center == null) return;
+
+    final Offset vector = currentPoint - center;
+    final double radius = vector.distance;
+    if (radius < _minimumRadialRadius) {
+      if (_radialPreviewRadius == radius && _radialPreviewLineCount == 0) {
+        return;
+      }
+      _radialPreviewRadius = radius;
+      _radialPreviewLineCount = 0;
+      notifyListeners();
+      return;
+    }
+
+    final double angle = math.atan2(vector.dy, vector.dx);
+    _radialPreviewStartAngle = angle - (math.pi / 2.0);
+    _radialPreviewSweepAngle = math.pi;
+    _radialPreviewRadius = radius;
+    _radialPreviewLineCount = _configuredRadialLineCount;
+    notifyListeners();
+  }
+
+  void commitRadialPreview() {
+    final Offset? center = _radialPreviewCenter;
+    final double? startAngle = _radialPreviewStartAngle;
+    final double radius = _radialPreviewRadius;
+    final int lineCount = _radialPreviewLineCount;
+    if (center == null ||
+        startAngle == null ||
+        radius < _minimumRadialRadius ||
+        lineCount <= 0) {
+      if (_radialPreviewCenter != null) {
+        _clearRadialPreviewState();
+        notifyListeners();
+      }
+      return;
+    }
+
+    final double sweepAngle = _radialPreviewSweepAngle;
+    final DrawingLayer layer = _activeLayer;
+    final Color strokeColor = currentStrokeColor;
+    final double strokeWidth = _strokeWidth;
+    bool addedLine = false;
+
+    _saveState();
+    for (int index = 0; index < lineCount; index++) {
+      final double t = lineCount == 1 ? 0.0 : index / (lineCount - 1);
+      final double angle = startAngle + sweepAngle * t;
+      final double visibleLengthRatio =
+          _radialVisibleLengthRatioForIndex(index);
+      final double innerRadius = radius * (1.0 - visibleLengthRatio);
+      final _RadialLineSegment? segment = _resolveRadialLineSegment(
+        center,
+        angle,
+        innerRadius,
+        radius,
+      );
+      if (segment == null) {
+        continue;
+      }
+      if ((segment.end - segment.start).distance < 0.5) {
+        continue;
+      }
+      _lines.add(
+        DrawnLine(
+          <Point>[
+            Point(segment.start, strokeWidth),
+            Point(segment.end, strokeWidth),
+          ],
+          color: strokeColor,
+          width: strokeWidth,
+          tool: ToolType.radial,
+          sequence: _takeNextSequence(),
+          variableWidth: false,
+          isFinished: true,
+          layer: layer,
+        ),
+      );
+      addedLine = true;
+    }
+
+    _clearRadialPreviewState();
+    if (addedLine) {
+      _markLayerContentChanged();
+    } else {
+      _undoStack.removeLast();
+    }
+    notifyListeners();
+  }
+
+  void clearRadialPreview() {
+    if (_radialPreviewCenter == null) return;
+    _clearRadialPreviewState();
+    notifyListeners();
+  }
+
+  void setRadialPreviewRadius(double radius) {
+    if (_radialPreviewCenter == null) return;
+    final double clamped = radius.clamp(0.0, radialPreviewMaxRadius).toDouble();
+    if ((_radialPreviewRadius - clamped).abs() < 0.001) return;
+    _radialPreviewRadius = clamped;
+    if (_radialPreviewStartAngle != null) {
+      _radialPreviewLineCount = _configuredRadialLineCount;
+    }
+    notifyListeners();
+  }
+
+  void setRadialPreviewSweepDegrees(double degrees) {
+    if (_radialPreviewCenter == null) return;
+    if ((_radialPreviewSweepAngle - math.pi).abs() < 0.0001) return;
+    _radialPreviewSweepAngle = math.pi;
+    _radialPreviewLineCount = _configuredRadialLineCount;
+    notifyListeners();
+  }
+
+  double _radialVisibleLengthRatioForIndex(int index) {
+    switch (index % 2) {
+      case 0:
+        return _linesStartPointRatioA;
+      default:
+        return _linesStartPointRatioB;
+    }
+  }
+
+  int get _configuredRadialLineCount {
+    final double normalized = _radialLineDensity / 100.0;
+    return _radialMinLineCount +
+        ((_radialMaxLineCount - _radialMinLineCount) * normalized).round();
+  }
+
   void setActiveLayer(DrawingLayer layer) {
     if (_activeLayer == layer) return;
     _activeLayer = layer;
     _notifyUiOnly();
+  }
+
+  void _clearRadialPreviewState() {
+    _radialPreviewCenter = null;
+    _radialPreviewStartAngle = null;
+    _radialPreviewSweepAngle = 0.0;
+    _radialPreviewRadius = 0.0;
+    _radialPreviewLineCount = 0;
+  }
+
+  _RadialLineSegment? _resolveRadialLineSegment(
+    Offset center,
+    double angle,
+    double innerRadius,
+    double outerRadius,
+  ) {
+    final Offset desiredEnd = _pointAlongAngle(center, angle, outerRadius);
+    final Offset? clippedEnd = _clampRayToCanvas(center, desiredEnd);
+    if (clippedEnd == null) return null;
+
+    final double effectiveOuterRadius = (clippedEnd - center).distance;
+    if (effectiveOuterRadius < 0.5) {
+      return null;
+    }
+
+    final double clampedInnerRadius =
+        innerRadius.clamp(0.0, effectiveOuterRadius).toDouble();
+    return _RadialLineSegment(
+      start: _pointAlongAngle(center, angle, clampedInnerRadius),
+      end: clippedEnd,
+    );
+  }
+
+  Offset? _clampRayToCanvas(Offset inside, Offset candidate) {
+    if (_canvasSize == Size.zero) {
+      return candidate;
+    }
+
+    final bool isInsideBounds = candidate.dx >= 0.0 &&
+        candidate.dy >= 0.0 &&
+        candidate.dx <= _canvasSize.width &&
+        candidate.dy <= _canvasSize.height;
+    if (isInsideBounds) {
+      return candidate;
+    }
+
+    final double dx = candidate.dx - inside.dx;
+    final double dy = candidate.dy - inside.dy;
+    if (dx == 0.0 && dy == 0.0) {
+      return null;
+    }
+
+    final List<double> intersections = <double>[];
+    if (dx > 0.0) {
+      intersections.add((_canvasSize.width - inside.dx) / dx);
+    } else if (dx < 0.0) {
+      intersections.add((0.0 - inside.dx) / dx);
+    }
+    if (dy > 0.0) {
+      intersections.add((_canvasSize.height - inside.dy) / dy);
+    } else if (dy < 0.0) {
+      intersections.add((0.0 - inside.dy) / dy);
+    }
+
+    double t = 1.0;
+    for (final double candidateT in intersections) {
+      if (candidateT >= 0.0 && candidateT <= 1.0 && candidateT < t) {
+        t = candidateT;
+      }
+    }
+    return Offset(
+      inside.dx + dx * t,
+      inside.dy + dy * t,
+    );
+  }
+
+  Offset _pointAlongAngle(Offset center, double angle, double distance) {
+    return Offset(
+      center.dx + math.cos(angle) * distance,
+      center.dy + math.sin(angle) * distance,
+    );
   }
 
   void setLayerVisibility(DrawingLayer layer, bool isVisible) {
@@ -1318,6 +1640,7 @@ class DrawingProvider extends ChangeNotifier {
     _layerCBaseSampling = RasterSamplingMode.pixelated;
     _shapeStart = null;
     _shapeEnd = null;
+    _clearRadialPreviewState();
     _markLayerContentChanged();
     notifyListeners();
   }
@@ -1562,6 +1885,7 @@ class DrawingProvider extends ChangeNotifier {
     _selectionMasksSource = snapshot.selectionMasksSource;
     _selectionHandlesFilled = snapshot.selectionHandlesFilled;
     _selectionMergeToActiveLayer = snapshot.selectionMergeToActiveLayer;
+    _clearRadialPreviewState();
     _markLayerContentChanged();
   }
 
@@ -1801,6 +2125,11 @@ class DrawingProvider extends ChangeNotifier {
     if (_isDrawingLasso) {
       _lassoPoints.clear();
       _isDrawingLasso = false;
+      changed = true;
+    }
+
+    if (_radialPreviewCenter != null) {
+      _clearRadialPreviewState();
       changed = true;
     }
 
