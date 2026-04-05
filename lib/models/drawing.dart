@@ -76,6 +76,7 @@ class Point {
 class LassoSelection {
   /// Text / pasted bitmap selection. Null = vector lasso (replay strokes under mask).
   final Image? rasterImage;
+  final RasterSamplingMode rasterSampling;
 
   /// When [rasterImage] is null, replay layer content with `sequence <= maxContentSequence`.
   final int maxContentSequence;
@@ -89,6 +90,7 @@ class LassoSelection {
 
   LassoSelection({
     this.rasterImage,
+    this.rasterSampling = RasterSamplingMode.smooth,
     this.maxContentSequence = 0,
     required this.maskPath,
     required this.layer,

@@ -218,7 +218,7 @@ class LayerCompositePainter {
         Paint()
           ..isAntiAlias = false
           ..filterQuality = baseSampling == RasterSamplingMode.smooth
-              ? FilterQuality.medium
+              ? FilterQuality.high
               : FilterQuality.none,
       );
     }
@@ -377,7 +377,7 @@ class LayerCompositePainter {
       image: img,
       fit: BoxFit.fill,
       filterQuality: placement.rasterSampling == RasterSamplingMode.smooth
-          ? FilterQuality.medium
+          ? FilterQuality.high
           : FilterQuality.none,
     );
     canvas.restore();
@@ -413,7 +413,9 @@ class LayerCompositePainter {
         rect: rect,
         image: raster,
         fit: BoxFit.fill,
-        filterQuality: FilterQuality.none,
+        filterQuality: selection.rasterSampling == RasterSamplingMode.smooth
+            ? FilterQuality.high
+            : FilterQuality.none,
       );
       canvas.restore();
       return;

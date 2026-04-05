@@ -150,6 +150,7 @@ class DrawingProvider extends ChangeNotifier {
   bool _selectionHandlesFilled = false;
   bool _selectionMergeToActiveLayer = false;
   ui.Image? _clipboardImage;
+  RasterSamplingMode _clipboardImageSampling = RasterSamplingMode.smooth;
   _ClipboardVectorSpec? _clipboardVector;
 
   // Shapes
@@ -230,6 +231,8 @@ class DrawingProvider extends ChangeNotifier {
   static const Duration _autosaveInterval = Duration(minutes: 5);
   static const Duration _autosaveIdleThreshold = Duration(seconds: 20);
   static const Duration _autosaveRetryDelay = Duration(seconds: 30);
+  static const RasterSamplingMode _rasterImageSampling =
+      RasterSamplingMode.smooth;
   static const List<DrawingLayer> _backupLayers = <DrawingLayer>[
     DrawingLayer.layerA,
     DrawingLayer.layerB,
@@ -627,7 +630,11 @@ class DrawingProvider extends ChangeNotifier {
     }
     _placements.clear();
 
-    _setLayerBaseImage(_activeLayer, merged);
+    _setLayerBaseImage(
+      _activeLayer,
+      merged,
+      sampling: _rasterImageSampling,
+    );
     _setLayerOpacityValue(_activeLayer, 1.0);
     _setLayerVisibilityValue(_activeLayer, true);
     _lassoPoints.clear();
@@ -690,7 +697,7 @@ class DrawingProvider extends ChangeNotifier {
     _setLayerBaseImage(
       _activeLayer,
       merged,
-      sampling: RasterSamplingMode.smooth,
+      sampling: _rasterImageSampling,
     );
     notifyListeners();
   }
@@ -859,7 +866,7 @@ class DrawingProvider extends ChangeNotifier {
           ..isAntiAlias = false
           ..filterQuality =
               _layerBaseSamplingFor(layer) == RasterSamplingMode.smooth
-                  ? FilterQuality.medium
+                  ? FilterQuality.high
                   : FilterQuality.none,
       );
     }
@@ -875,7 +882,7 @@ class DrawingProvider extends ChangeNotifier {
       dstRect,
       Paint()
         ..isAntiAlias = true
-        ..filterQuality = FilterQuality.medium,
+        ..filterQuality = FilterQuality.high,
     );
 
     final picture = recorder.endRecording();
@@ -1113,9 +1120,21 @@ class DrawingProvider extends ChangeNotifier {
     ]);
 
     _saveState();
-    _setLayerBaseImage(DrawingLayer.layerA, images[0]);
-    _setLayerBaseImage(DrawingLayer.layerB, images[1]);
-    _setLayerBaseImage(DrawingLayer.layerC, images[2]);
+    _setLayerBaseImage(
+      DrawingLayer.layerA,
+      images[0],
+      sampling: _rasterImageSampling,
+    );
+    _setLayerBaseImage(
+      DrawingLayer.layerB,
+      images[1],
+      sampling: _rasterImageSampling,
+    );
+    _setLayerBaseImage(
+      DrawingLayer.layerC,
+      images[2],
+      sampling: _rasterImageSampling,
+    );
     for (final layer in _backupLayers) {
       _clearLayerLines(layer);
     }
@@ -1598,6 +1617,7 @@ class DrawingProvider extends ChangeNotifier {
     final Path clonedPath = Path()..addPath(src.maskPath, Offset.zero);
     return LassoSelection(
       rasterImage: src.rasterImage,
+      rasterSampling: src.rasterSampling,
       maxContentSequence: src.maxContentSequence,
       maskPath: clonedPath,
       layer: src.layer,
@@ -2032,10 +2052,12 @@ class DrawingProvider extends ChangeNotifier {
     final LassoSelection selection = _selection!;
     if (selection.rasterImage != null) {
       _clipboardImage = selection.rasterImage;
+      _clipboardImageSampling = selection.rasterSampling;
       _clipboardVector = null;
     } else {
       _clipboardImage =
           await _rasterizeVectorSelectionToImage(selection, _canvasSize);
+      _clipboardImageSampling = _rasterImageSampling;
       _clipboardVector = null;
     }
 
@@ -2044,7 +2066,11 @@ class DrawingProvider extends ChangeNotifier {
       selection.layer,
       selection,
     );
-    _setLayerBaseImage(selection.layer, cutLayer);
+    _setLayerBaseImage(
+      selection.layer,
+      cutLayer,
+      sampling: _layerBaseSamplingFor(selection.layer),
+    );
     _clearLayerLines(selection.layer);
     _resetSelectionState();
     notifyListeners();
@@ -2056,6 +2082,7 @@ class DrawingProvider extends ChangeNotifier {
       final LassoSelection s = _selection!;
       if (s.rasterImage != null) {
         _clipboardImage = s.rasterImage;
+        _clipboardImageSampling = s.rasterSampling;
         _clipboardVector = null;
       } else {
         _clipboardImage = null;
@@ -2119,6 +2146,7 @@ class DrawingProvider extends ChangeNotifier {
     );
     _selection = LassoSelection(
       rasterImage: image,
+      rasterSampling: _clipboardImageSampling,
       maxContentSequence: 0,
       maskPath: Path()..addRect(baseRect),
       layer: _activeLayer,
@@ -2166,6 +2194,7 @@ class DrawingProvider extends ChangeNotifier {
     );
     _selection = LassoSelection(
       rasterImage: textImage,
+      rasterSampling: _rasterImageSampling,
       maxContentSequence: 0,
       maskPath: Path()..addRect(baseRect),
       layer: _activeLayer,
@@ -2662,6 +2691,7 @@ class DrawingProvider extends ChangeNotifier {
     _placements.add(
       LayerPlacement(
         rasterImage: selection.rasterImage,
+        rasterSampling: selection.rasterSampling,
         vectorSourceLayer:
             selection.rasterImage == null ? selection.layer : null,
         vectorMaskPath: selection.rasterImage == null
