@@ -24,8 +24,7 @@ Future<void> main() async {
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
-      title:
-          'flpaint_\u30d7\u30ed\u30f3\u30d7\u30c82.1_BK\u5b9f\u88c5\u3068\u5c0f\u658721_\u30a4\u30f3\u30dd\u30fc\u30c8\u4fee\u6b63ver',
+      title: 'FLPaint_2.1b',
     );
     windowManager.waitUntilReadyToShow(windowOptions, () async {
       try {
@@ -53,7 +52,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'flpaint_\u30d7\u30ed\u30c8\u30bf\u30a4\u30d72.1',
+      title: 'FLPaint_2.1b',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,
@@ -225,7 +224,7 @@ class _MyHomePageState extends State<MyHomePage> {
         child: _buildWindowMovablePanel(
           child: AppBar(
             title:
-                const Text('FLPaint \u30d7\u30ed\u30c8\u30bf\u30a4\u30d72.1'),
+                const Text('FLPaint_\u30d7\u30ed\u30c8\u30bf\u30a4\u30d72.1b'),
             actions: [
               IconButton(
                 icon: const Icon(Icons.undo),
@@ -276,16 +275,18 @@ class _MyHomePageState extends State<MyHomePage> {
                                 child: _CanvasSheet(),
                               ),
                               Positioned.fill(
-                                child: DrawingCanvas(
-                                  onTwoFingerPan: _onCanvasTwoFingerPan,
-                                  onTwoFingerScale: _onCanvasTwoFingerScale,
-                                  toCanvas: _toCanvasPosition,
-                                  onSelectionHandleInteractionChanged:
-                                      _onSelectionHandleInteractionChanged,
-                                  logicalCanvasSize: const Size(768, 1024),
-                                  canvasVisualOffset: const Offset(
-                                    _canvasViewportPadding,
-                                    _canvasViewportPadding,
+                                child: RepaintBoundary(
+                                  child: DrawingCanvas(
+                                    onTwoFingerPan: _onCanvasTwoFingerPan,
+                                    onTwoFingerScale: _onCanvasTwoFingerScale,
+                                    toCanvas: _toCanvasPosition,
+                                    onSelectionHandleInteractionChanged:
+                                        _onSelectionHandleInteractionChanged,
+                                    logicalCanvasSize: const Size(768, 1024),
+                                    canvasVisualOffset: const Offset(
+                                      _canvasViewportPadding,
+                                      _canvasViewportPadding,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -303,7 +304,9 @@ class _MyHomePageState extends State<MyHomePage> {
                         border:
                             Border(left: BorderSide(color: Colors.grey[300]!)),
                       ),
-                      child: const ToolSidebar(),
+                      child: const RepaintBoundary(
+                        child: ToolSidebar(),
+                      ),
                     ),
                   ),
                 ],
@@ -323,7 +326,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                   ],
                 ),
-                child: const DrawingControls(),
+                child: const RepaintBoundary(
+                  child: DrawingControls(),
+                ),
               ),
             ),
           ],

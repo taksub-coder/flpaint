@@ -39,180 +39,182 @@ class ToolSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext rootContext) {
-    return Consumer<DrawingProvider>(
-      builder: (context, drawing, _) {
-        final selected = drawing.currentTool;
-        return Container(
-          width: 80,
-          color: Colors.grey.shade200,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _ToolButton(
-                  label: 'P',
-                  tooltip: 'Pen',
-                  selected: selected == ToolType.pen,
-                  onTap: () => drawing.setTool(ToolType.pen),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'T',
-                  tooltip: 'Pressure pen',
-                  selected: selected == ToolType.pressure,
-                  onTap: () => drawing.setTool(ToolType.pressure),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'E',
-                  tooltip: 'Eraser',
-                  selected: selected == ToolType.eraser,
-                  onTap: () => drawing.setTool(ToolType.eraser),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'L',
-                  tooltip: 'Line',
-                  selected: selected == ToolType.line,
-                  onTap: () => drawing.setTool(ToolType.line),
-                ),
-                const Divider(height: 20),
-                _ToolButton(
-                  label: '□',
-                  tooltip: 'Rectangle',
-                  selected: selected == ToolType.rect,
-                  onTap: () => drawing.setTool(ToolType.rect),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: '■',
-                  tooltip: 'Filled rectangle',
-                  selected: selected == ToolType.fillRect,
-                  onTap: () => drawing.setTool(ToolType.fillRect),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: '○',
-                  tooltip: 'Circle',
-                  selected: selected == ToolType.circle,
-                  onTap: () => drawing.setTool(ToolType.circle),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: '●',
-                  tooltip: 'Filled circle',
-                  selected: selected == ToolType.fillCircle,
-                  onTap: () => drawing.setTool(ToolType.fillCircle),
-                ),
-                const SizedBox(height: 12),
-                _ToolButton(
-                  icon: Icons.gesture,
-                  tooltip: 'Lasso select',
-                  selected: selected == ToolType.lasso,
-                  onTap: () => drawing.setTool(ToolType.lasso),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'C',
-                  tooltip: 'Cut selection',
-                  selected: false,
-                  onTap: () => drawing.cutSelectionToClipboard(),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'CP',
-                  tooltip: 'Copy & paste selection',
-                  selected: false,
-                  onTap: () => drawing.copyPasteSelection(),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'Merge',
-                  tooltip: 'Merge all layers into the active layer',
-                  selected: false,
-                  onTap: () => drawing.mergeLayersToActiveLayer(),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'あ',
-                  tooltip: 'Text input',
-                  selected: false,
-                  onTap: () {
-                    _showTextInputDialog(
-                      context: rootContext,
-                      drawing: drawing,
-                    );
-                  },
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: '30',
-                  tooltip: 'Tone 30%',
-                  selected: selected == ToolType.tone30,
-                  onTap: () => drawing.setTool(ToolType.tone30),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: '60',
-                  tooltip: 'Tone 60%',
-                  selected: selected == ToolType.tone60,
-                  onTap: () => drawing.setTool(ToolType.tone60),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: '80',
-                  tooltip: 'Tone 80%',
-                  selected: selected == ToolType.tone80,
-                  onTap: () => drawing.setTool(ToolType.tone80),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: drawing.useWhiteStrokeColor ? 'White' : 'Black',
-                  tooltip: 'Toggle stroke color',
-                  selected: drawing.useWhiteStrokeColor,
-                  onTap: drawing.toggleStrokeColorMode,
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'Bk',
-                  tooltip: 'Backup layers',
-                  selected: false,
-                  onTap: () => _runManualBackup(
-                    context: rootContext,
-                    drawing: drawing,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'Rst',
-                  tooltip: 'Restore layers',
-                  selected: false,
-                  onTap: () => _showRestoreSelector(
-                    context: rootContext,
-                    drawing: drawing,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'IN',
-                  tooltip: 'Import image',
-                  selected: false,
-                  onTap: () => drawing.importImageFromDialog(),
-                ),
-                const SizedBox(height: 8),
-                _ToolButton(
-                  label: 'EXP',
-                  tooltip: 'Export image',
-                  selected: false,
-                  onTap: () =>
-                      drawing.exportImageFromDialog(context: rootContext),
-                ),
-              ],
+    final DrawingProvider drawing = rootContext.read<DrawingProvider>();
+    final ToolType selected = rootContext.select<DrawingProvider, ToolType>(
+      (drawing) => drawing.currentTool,
+    );
+    final bool useWhiteStrokeColor = rootContext.select<DrawingProvider, bool>(
+      (drawing) => drawing.useWhiteStrokeColor,
+    );
+
+    return Container(
+      width: 80,
+      color: Colors.grey.shade200,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ToolButton(
+              label: 'P',
+              tooltip: 'Pen',
+              selected: selected == ToolType.pen,
+              onTap: () => drawing.setTool(ToolType.pen),
             ),
-          ),
-        );
-      },
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'T',
+              tooltip: 'Pressure pen',
+              selected: selected == ToolType.pressure,
+              onTap: () => drawing.setTool(ToolType.pressure),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'E',
+              tooltip: 'Eraser',
+              selected: selected == ToolType.eraser,
+              onTap: () => drawing.setTool(ToolType.eraser),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: useWhiteStrokeColor ? 'White' : 'Black',
+              tooltip: 'Toggle stroke color',
+              selected: useWhiteStrokeColor,
+              onTap: drawing.toggleStrokeColorMode,
+            ),
+            const Divider(height: 20),
+            _ToolButton(
+              label: '／',
+              tooltip: 'Line',
+              selected: selected == ToolType.line,
+              onTap: () => drawing.setTool(ToolType.line),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: '□',
+              tooltip: 'Rectangle',
+              selected: selected == ToolType.rect,
+              onTap: () => drawing.setTool(ToolType.rect),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: '■',
+              tooltip: 'Filled rectangle',
+              selected: selected == ToolType.fillRect,
+              onTap: () => drawing.setTool(ToolType.fillRect),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: '○',
+              tooltip: 'Circle',
+              selected: selected == ToolType.circle,
+              onTap: () => drawing.setTool(ToolType.circle),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: '●',
+              tooltip: 'Filled circle',
+              selected: selected == ToolType.fillCircle,
+              onTap: () => drawing.setTool(ToolType.fillCircle),
+            ),
+            const SizedBox(height: 12),
+            _ToolButton(
+              icon: Icons.gesture,
+              tooltip: 'Lasso select',
+              selected: selected == ToolType.lasso,
+              onTap: () => drawing.setTool(ToolType.lasso),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'C',
+              tooltip: 'Cut selection',
+              selected: false,
+              onTap: () => drawing.cutSelectionToClipboard(),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'CP',
+              tooltip: 'Copy & paste selection',
+              selected: false,
+              onTap: () => drawing.copyPasteSelection(),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'Merge',
+              tooltip: 'Merge all layers into the active layer',
+              selected: false,
+              onTap: () => drawing.mergeLayersToActiveLayer(),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'あ',
+              tooltip: 'Text input',
+              selected: false,
+              onTap: () {
+                _showTextInputDialog(
+                  context: rootContext,
+                  drawing: drawing,
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: '30',
+              tooltip: 'Tone 30%',
+              selected: selected == ToolType.tone30,
+              onTap: () => drawing.setTool(ToolType.tone30),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: '60',
+              tooltip: 'Tone 60%',
+              selected: selected == ToolType.tone60,
+              onTap: () => drawing.setTool(ToolType.tone60),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: '80',
+              tooltip: 'Tone 80%',
+              selected: selected == ToolType.tone80,
+              onTap: () => drawing.setTool(ToolType.tone80),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'Bk',
+              tooltip: 'Backup layers',
+              selected: false,
+              onTap: () => _runManualBackup(
+                context: rootContext,
+                drawing: drawing,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'Rst',
+              tooltip: 'Restore layers',
+              selected: false,
+              onTap: () => _showRestoreSelector(
+                context: rootContext,
+                drawing: drawing,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'IN',
+              tooltip: 'Import image',
+              selected: false,
+              onTap: () => drawing.importImageFromDialog(),
+            ),
+            const SizedBox(height: 8),
+            _ToolButton(
+              label: 'EXP',
+              tooltip: 'Export image',
+              selected: false,
+              onTap: () => drawing.exportImageFromDialog(context: rootContext),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

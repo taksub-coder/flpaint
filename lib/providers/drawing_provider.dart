@@ -323,6 +323,10 @@ class DrawingProvider extends ChangeNotifier {
     super.notifyListeners();
   }
 
+  void _notifyUiOnly() {
+    super.notifyListeners();
+  }
+
   void setCanvasSize(Size size) {
     if (_canvasSize == size) return;
     _canvasSize = size;
@@ -538,7 +542,7 @@ class DrawingProvider extends ChangeNotifier {
 
   void toggleStrokeColorMode() {
     _useWhiteStrokeColor = !_useWhiteStrokeColor;
-    notifyListeners();
+    _notifyUiOnly();
   }
 
   void setStrokeWidth(double width) {
@@ -551,7 +555,7 @@ class DrawingProvider extends ChangeNotifier {
       _terminateLassoSession();
     }
     _strokeWidth = width.clamp(1.0, 30.0).toDouble();
-    notifyListeners();
+    _notifyUiOnly();
   }
 
   void setEraserWidth(double width) {
@@ -559,13 +563,13 @@ class DrawingProvider extends ChangeNotifier {
       _terminateLassoSession();
     }
     _eraserWidth = width.clamp(1.0, 30.0).toDouble();
-    notifyListeners();
+    _notifyUiOnly();
   }
 
   void setActiveLayer(DrawingLayer layer) {
     if (_activeLayer == layer) return;
     _activeLayer = layer;
-    notifyListeners();
+    _notifyUiOnly();
   }
 
   void setLayerVisibility(DrawingLayer layer, bool isVisible) {
