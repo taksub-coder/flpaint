@@ -1,4 +1,4 @@
-//flpaint_プロトタイプ1.6_文字入力第２調整版
+//flpaint_プロトタイプ2.1C
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -1876,7 +1876,7 @@ class DrawingProvider extends ChangeNotifier {
   // ==========================================
   void optimizeMemoryForEmergency() {
     debugPrint(
-      '🚨 [FLPaint] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
+      '🚨 [flpaint_プロトタイプ2.1C] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
     );
 
     _redoStack.clear();
@@ -1890,7 +1890,7 @@ class DrawingProvider extends ChangeNotifier {
     PaintingBinding.instance.imageCache.clearLiveImages();
 
     debugPrint(
-      '✅ [FLPaint] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
+      '✅ [flpaint_プロトタイプ2.1C] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
     );
     _notifyUiOnly();
   }

@@ -25,7 +25,7 @@ Future<void> main() async {
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
-      title: 'FLPaint_2.1b',
+      title: 'flpaint_プロトタイプ2.1C',
     );
     windowManager.waitUntilReadyToShow(windowOptions, () async {
       try {
@@ -53,7 +53,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'FLPaint_2.1b',
+      title: 'flpaint_プロトタイプ2.1C',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.blue,
@@ -234,7 +234,7 @@ class _MyHomePageState extends State<MyHomePage>
         child: _buildWindowMovablePanel(
           child: AppBar(
             title:
-                const Text('FLPaint_\u30d7\u30ed\u30c8\u30bf\u30a4\u30d72.1b'),
+                const Text('flpaint_プロトタイプ2.1C'),
             actions: [
               IconButton(
                 icon: const Icon(Icons.undo),
