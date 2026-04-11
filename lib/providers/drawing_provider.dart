@@ -121,6 +121,24 @@ class _RadialLineSegment {
   });
 }
 
+class _RadialGroupSpec {
+  final int lineCount;
+  final double visibleLengthRatio;
+  final double offsetAngle;
+  final bool isGroupB;
+
+  const _RadialGroupSpec({
+    required this.lineCount,
+    required this.visibleLengthRatio,
+    required this.offsetAngle,
+    required this.isGroupB,
+  });
+
+  double basePhase(double step) {
+    return isGroupB ? step / 2.0 : 0.0;
+  }
+}
+
 class DrawingProvider extends ChangeNotifier {
   final List<DrawnLine> _lines = [];
   final List<LayerPlacement> _placements = [];
@@ -173,7 +191,10 @@ class DrawingProvider extends ChangeNotifier {
   double _radialPreviewSweepAngle = 0.0;
   double _radialPreviewRadius = 0.0;
   int _radialPreviewLineCount = 0;
-  double _radialLineDensity = 45.0;
+  int _radialLineCountA = 16;
+  int _radialLineCountB = 16;
+  double _radialOffsetAngleA = 0.0;
+  double _radialOffsetAngleB = 0.0;
 
   // Undo / Redo
   final List<_DrawingSnapshot> _undoStack = [];
@@ -247,16 +268,13 @@ class DrawingProvider extends ChangeNotifier {
       _radialPreviewSweepAngle.abs() * 180.0 / math.pi;
   double get radialPreviewRadius => _radialPreviewRadius;
   double get radialPreviewDiameter => _radialPreviewRadius * 2.0;
-  double get radialLineDensity => _radialLineDensity;
-  String get radialLineDensityLabel {
-    if (_radialLineDensity < 33.0) {
-      return '少';
-    }
-    if (_radialLineDensity < 66.0) {
-      return '中';
-    }
-    return '多';
-  }
+  int get radialLineCountA => _radialLineCountA;
+  int get radialLineCountB => _radialLineCountB;
+  int get radialTotalLineCount => _radialLineCountA + _radialLineCountB;
+  double get radialOffsetAngleA => _radialOffsetAngleA;
+  double get radialOffsetAngleB => _radialOffsetAngleB;
+  double get radialOffsetDegreesA => _radialOffsetAngleA * 180.0 / math.pi;
+  double get radialOffsetDegreesB => _radialOffsetAngleB * 180.0 / math.pi;
 
   double get radialPreviewMaxRadius {
     final Size size = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
@@ -292,8 +310,9 @@ class DrawingProvider extends ChangeNotifier {
   static const RasterSamplingMode _rasterImageSampling =
       RasterSamplingMode.smooth;
   static const double _minimumRadialRadius = 2.0;
-  static const int _radialMinLineCount = 8;
-  static const int _radialMaxLineCount = 72;
+  static const int _radialMinLineCount = 4;
+  static const int _radialMaxLineCount = 250;
+  static const double _defaultRadialPreviewRadiusFactor = 0.2;
   static const List<DrawingLayer> _backupLayers = <DrawingLayer>[
     DrawingLayer.layerA,
     DrawingLayer.layerB,
@@ -391,6 +410,18 @@ class DrawingProvider extends ChangeNotifier {
   void setCanvasSize(Size size) {
     if (_canvasSize == size) return;
     _canvasSize = size;
+    if (_tool == ToolType.radial && _radialPreviewCenter != null) {
+      final Offset clampedCenter =
+          _clampRadialPreviewCenter(_radialPreviewCenter!);
+      final double clampedRadius =
+          _radialPreviewRadius.clamp(0.0, radialPreviewMaxRadius).toDouble();
+      if (clampedCenter != _radialPreviewCenter ||
+          (clampedRadius - _radialPreviewRadius).abs() >= 0.001) {
+        _radialPreviewCenter = clampedCenter;
+        _radialPreviewRadius = clampedRadius;
+        _notifyUiOnly();
+      }
+    }
   }
 
   void warmUp() {
@@ -594,6 +625,9 @@ class DrawingProvider extends ChangeNotifier {
       _clearRadialPreviewState();
     }
     _tool = tool;
+    if (tool == ToolType.radial) {
+      _ensureRadialPreviewInitialized();
+    }
     if (tool == ToolType.tone30 ||
         tool == ToolType.tone60 ||
         tool == ToolType.tone80) {
@@ -657,12 +691,54 @@ class DrawingProvider extends ChangeNotifier {
     _notifyUiOnly();
   }
 
-  void setRadialLineDensity(double value) {
-    final double clamped = value.clamp(0.0, 100.0).toDouble();
-    if ((_radialLineDensity - clamped).abs() < 0.001) return;
-    _radialLineDensity = clamped;
+  void setRadialLineCountA(double value) {
+    final int clamped = value.round().clamp(
+      _radialMinLineCount,
+      _radialMaxLineCount,
+    );
+    if (_radialLineCountA == clamped) return;
+    _radialLineCountA = clamped;
+    _syncRadialPreviewLineCount();
     if (_tool == ToolType.radial && _radialPreviewCenter != null) {
-      _radialPreviewLineCount = _configuredRadialLineCount;
+      notifyListeners();
+      return;
+    }
+    _notifyUiOnly();
+  }
+
+  void setRadialLineCountB(double value) {
+    final int clamped = value.round().clamp(
+      _radialMinLineCount,
+      _radialMaxLineCount,
+    );
+    if (_radialLineCountB == clamped) return;
+    _radialLineCountB = clamped;
+    _syncRadialPreviewLineCount();
+    if (_tool == ToolType.radial && _radialPreviewCenter != null) {
+      notifyListeners();
+      return;
+    }
+    _notifyUiOnly();
+  }
+
+  void setRadialOffsetAngleA(double degrees) {
+    final double clamped = degrees.clamp(-180.0, 180.0).toDouble();
+    final double radians = clamped * math.pi / 180.0;
+    if ((_radialOffsetAngleA - radians).abs() < 0.0001) return;
+    _radialOffsetAngleA = radians;
+    if (_tool == ToolType.radial && _radialPreviewCenter != null) {
+      notifyListeners();
+      return;
+    }
+    _notifyUiOnly();
+  }
+
+  void setRadialOffsetAngleB(double degrees) {
+    final double clamped = degrees.clamp(-180.0, 180.0).toDouble();
+    final double radians = clamped * math.pi / 180.0;
+    if ((_radialOffsetAngleB - radians).abs() < 0.0001) return;
+    _radialOffsetAngleB = radians;
+    if (_tool == ToolType.radial && _radialPreviewCenter != null) {
       notifyListeners();
       return;
     }
@@ -670,8 +746,7 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   void startRadialPreview(Offset center) {
-    _clearRadialPreviewState();
-    _radialPreviewCenter = center;
+    _ensureRadialPreviewInitialized(center: center);
     notifyListeners();
   }
 
@@ -691,11 +766,10 @@ class DrawingProvider extends ChangeNotifier {
       return;
     }
 
-    final double angle = math.atan2(vector.dy, vector.dx);
-    _radialPreviewStartAngle = angle - (math.pi / 2.0);
-    _radialPreviewSweepAngle = math.pi;
+    _radialPreviewStartAngle = -(math.pi / 2.0);
+    _radialPreviewSweepAngle = 2 * math.pi;
     _radialPreviewRadius = radius;
-    _radialPreviewLineCount = _configuredRadialLineCount;
+    _syncRadialPreviewLineCount();
     notifyListeners();
   }
 
@@ -715,52 +789,56 @@ class DrawingProvider extends ChangeNotifier {
       return;
     }
 
-    final double sweepAngle = _radialPreviewSweepAngle;
     final DrawingLayer layer = _activeLayer;
     final Color strokeColor = currentStrokeColor;
     final double strokeWidth = _strokeWidth;
     bool addedLine = false;
 
     _saveState();
-    for (int index = 0; index < lineCount; index++) {
-      final double t = lineCount == 1 ? 0.0 : index / (lineCount - 1);
-      final double angle = startAngle + sweepAngle * t;
-      final double visibleLengthRatio =
-          _radialVisibleLengthRatioForIndex(index);
-      final double innerRadius = radius * (1.0 - visibleLengthRatio);
-      final _RadialLineSegment? segment = _resolveRadialLineSegment(
-        center,
-        angle,
-        innerRadius,
-        radius,
-      );
-      if (segment == null) {
-        continue;
+    for (final _RadialGroupSpec group in _radialGroupSpecs) {
+      final int count = group.lineCount;
+      if (count <= 0) continue;
+      final double step = (2 * math.pi) / count;
+      final double basePhase = group.basePhase(step);
+      final double innerRadius = radius * (1.0 - group.visibleLengthRatio);
+      for (int index = 0; index < count; index++) {
+        final double angle =
+            startAngle + basePhase + (step * index) + group.offsetAngle;
+        final _RadialLineSegment? segment = _resolveRadialLineSegment(
+          center,
+          angle,
+          innerRadius,
+          radius,
+        );
+        if (segment == null) {
+          continue;
+        }
+        if ((segment.end - segment.start).distance < 0.5) {
+          continue;
+        }
+        _lines.add(
+          DrawnLine(
+            <Point>[
+              Point(segment.start, strokeWidth),
+              Point(segment.end, strokeWidth),
+            ],
+            color: strokeColor,
+            width: strokeWidth,
+            tool: ToolType.radial,
+            sequence: _takeNextSequence(),
+            variableWidth: false,
+            isFinished: true,
+            layer: layer,
+          ),
+        );
+        addedLine = true;
       }
-      if ((segment.end - segment.start).distance < 0.5) {
-        continue;
-      }
-      _lines.add(
-        DrawnLine(
-          <Point>[
-            Point(segment.start, strokeWidth),
-            Point(segment.end, strokeWidth),
-          ],
-          color: strokeColor,
-          width: strokeWidth,
-          tool: ToolType.radial,
-          sequence: _takeNextSequence(),
-          variableWidth: false,
-          isFinished: true,
-          layer: layer,
-        ),
-      );
-      addedLine = true;
     }
 
     _clearRadialPreviewState();
     if (addedLine) {
       _markLayerContentChanged();
+      _tool = ToolType.pen;
     } else {
       _undoStack.removeLast();
     }
@@ -779,32 +857,94 @@ class DrawingProvider extends ChangeNotifier {
     if ((_radialPreviewRadius - clamped).abs() < 0.001) return;
     _radialPreviewRadius = clamped;
     if (_radialPreviewStartAngle != null) {
-      _radialPreviewLineCount = _configuredRadialLineCount;
+      _syncRadialPreviewLineCount();
     }
     notifyListeners();
+  }
+
+  void transformRadialPreview({
+    Offset? center,
+    double? radius,
+  }) {
+    if (_radialPreviewCenter == null) return;
+    bool changed = false;
+
+    if (center != null) {
+      final Offset clampedCenter = _clampRadialPreviewCenter(center);
+      if (clampedCenter != _radialPreviewCenter) {
+        _radialPreviewCenter = clampedCenter;
+        changed = true;
+      }
+    }
+
+    if (radius != null) {
+      final double clampedRadius =
+          radius.clamp(0.0, radialPreviewMaxRadius).toDouble();
+      if ((_radialPreviewRadius - clampedRadius).abs() >= 0.001) {
+        _radialPreviewRadius = clampedRadius;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      notifyListeners();
+    }
   }
 
   void setRadialPreviewSweepDegrees(double degrees) {
     if (_radialPreviewCenter == null) return;
-    if ((_radialPreviewSweepAngle - math.pi).abs() < 0.0001) return;
-    _radialPreviewSweepAngle = math.pi;
-    _radialPreviewLineCount = _configuredRadialLineCount;
+    if ((_radialPreviewSweepAngle - (2 * math.pi)).abs() < 0.0001) return;
+    _radialPreviewSweepAngle = 2 * math.pi;
+    _syncRadialPreviewLineCount();
     notifyListeners();
   }
 
-  double _radialVisibleLengthRatioForIndex(int index) {
-    switch (index % 2) {
-      case 0:
-        return _linesStartPointRatioA;
-      default:
-        return _linesStartPointRatioB;
-    }
+  List<_RadialGroupSpec> get _radialGroupSpecs => <_RadialGroupSpec>[
+        _RadialGroupSpec(
+          lineCount: _radialLineCountA,
+          visibleLengthRatio: _linesStartPointRatioA,
+          offsetAngle: _radialOffsetAngleA,
+          isGroupB: false,
+        ),
+        _RadialGroupSpec(
+          lineCount: _radialLineCountB,
+          visibleLengthRatio: _linesStartPointRatioB,
+          offsetAngle: _radialOffsetAngleB,
+          isGroupB: true,
+        ),
+      ];
+
+  void _syncRadialPreviewLineCount() {
+    _radialPreviewLineCount = radialTotalLineCount;
   }
 
-  int get _configuredRadialLineCount {
-    final double normalized = _radialLineDensity / 100.0;
-    return _radialMinLineCount +
-        ((_radialMaxLineCount - _radialMinLineCount) * normalized).round();
+  Offset _clampRadialPreviewCenter(Offset center) {
+    if (_canvasSize == Size.zero) {
+      return center;
+    }
+    return Offset(
+      center.dx.clamp(0.0, _canvasSize.width).toDouble(),
+      center.dy.clamp(0.0, _canvasSize.height).toDouble(),
+    );
+  }
+
+  double _defaultRadialPreviewRadius() {
+    final Size size = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    return math.min(size.width, size.height) * _defaultRadialPreviewRadiusFactor;
+  }
+
+  void _ensureRadialPreviewInitialized({Offset? center}) {
+    final Size size = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    final Offset defaultCenter = center ??
+        _radialPreviewCenter ??
+        Offset(size.width / 2.0, size.height / 2.0);
+    _radialPreviewCenter = _clampRadialPreviewCenter(defaultCenter);
+    _radialPreviewStartAngle = -(math.pi / 2.0);
+    _radialPreviewSweepAngle = 2 * math.pi;
+    if (_radialPreviewRadius < _minimumRadialRadius) {
+      _radialPreviewRadius = _defaultRadialPreviewRadius();
+    }
+    _syncRadialPreviewLineCount();
   }
 
   void setActiveLayer(DrawingLayer layer) {

@@ -31,21 +31,32 @@ class RadialToolPopup extends StatelessWidget {
     final double maxDiameter = context.select<DrawingProvider, double>(
       (drawing) => drawing.radialPreviewMaxDiameter,
     );
-    final double radialLineDensity = context.select<DrawingProvider, double>(
-      (drawing) => drawing.radialLineDensity,
+    final int radialLineCountA = context.select<DrawingProvider, int>(
+      (drawing) => drawing.radialLineCountA,
     );
-    final String radialLineDensityLabel =
-        context.select<DrawingProvider, String>(
-      (drawing) => drawing.radialLineDensityLabel,
+    final int radialLineCountB = context.select<DrawingProvider, int>(
+      (drawing) => drawing.radialLineCountB,
     );
-    final int lineCount = context.select<DrawingProvider, int>(
-      (drawing) => drawing.radialPreviewLineCount,
+    final int radialTotalLineCount = context.select<DrawingProvider, int>(
+      (drawing) => drawing.radialTotalLineCount,
+    );
+    final double radialOffsetDegreesA = context.select<DrawingProvider, double>(
+      (drawing) => drawing.radialOffsetDegreesA,
+    );
+    final double radialOffsetDegreesB = context.select<DrawingProvider, double>(
+      (drawing) => drawing.radialOffsetDegreesB,
+    );
+    final double radialLengthA = context.select<DrawingProvider, double>(
+      (drawing) => drawing.linesStartPointRatioA * 100.0,
+    );
+    final double radialLengthB = context.select<DrawingProvider, double>(
+      (drawing) => drawing.linesStartPointRatioB * 100.0,
     );
 
     return Material(
       color: Colors.transparent,
       child: Container(
-        width: 220,
+        width: 280,
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.96),
@@ -64,7 +75,7 @@ class RadialToolPopup extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              '\u653e\u5c04\u7dda',
+              '放射線',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
@@ -73,8 +84,8 @@ class RadialToolPopup extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               hasPreview
-                  ? '\u672c\u6570 $lineCount'
-                  : '\u4e2d\u5fc3\u70b9\u304b\u3089\u534a\u5f84\u3092\u30c9\u30e9\u30c3\u30b0\u3067\u6307\u5b9a',
+                  ? '合計 $radialTotalLineCount本 / 1本指で移動 / 2本指で拡大縮小'
+                  : 'プレビューを初期化中',
               style: TextStyle(
                 fontSize: 11,
                 color: hasPreview ? Colors.black87 : Colors.black54,
@@ -82,7 +93,7 @@ class RadialToolPopup extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             _PopupSliderRow(
-              label: '\u592a\u3055',
+              label: '太さ',
               value: strokeWidth,
               min: 1,
               max: 30,
@@ -92,24 +103,80 @@ class RadialToolPopup extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             _PopupSliderRow(
-              label: '\u5186\u5f27',
+              label: '円周',
               value: diameter.clamp(0.0, maxDiameter),
               min: 0,
               max: maxDiameter <= 0 ? 1 : maxDiameter,
-              divisions: 200,
+              divisions: 250,
               valueText: diameter.round().toString(),
               enabled: hasPreview,
               onChanged: (value) => drawing.setRadialPreviewRadius(value / 2.0),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
+            const _PopupSectionTitle(
+              label: 'A',
+              color: Color(0xC0686830),
+            ),
             _PopupSliderRow(
-              label: '\u6570',
-              value: radialLineDensity,
+              label: '本数',
+              value: radialLineCountA.toDouble(),
+              min: 4,
+              max: 250,
+              divisions: 246,
+              valueText: radialLineCountA.toString(),
+              onChanged: drawing.setRadialLineCountA,
+            ),
+            _PopupSliderRow(
+              label: '角度',
+              value: radialOffsetDegreesA,
+              min: -180,
+              max: 180,
+              divisions: 360,
+              valueText: radialOffsetDegreesA.round().toString(),
+              onChanged: drawing.setRadialOffsetAngleA,
+            ),
+            _PopupSliderRow(
+              label: '長さ',
+              value: radialLengthA,
               min: 0,
               max: 100,
               divisions: 100,
-              valueText: radialLineDensityLabel,
-              onChanged: drawing.setRadialLineDensity,
+              valueText: radialLengthA.round().toString(),
+              onChanged: (value) =>
+                  drawing.setLinesStartPointRatioA(value / 100.0),
+            ),
+            const SizedBox(height: 6),
+            const _PopupSectionTitle(
+              label: 'B',
+              color: Color(0xA8287A8B),
+            ),
+            _PopupSliderRow(
+              label: '本数',
+              value: radialLineCountB.toDouble(),
+              min: 4,
+              max: 250,
+              divisions: 246,
+              valueText: radialLineCountB.toString(),
+              onChanged: drawing.setRadialLineCountB,
+            ),
+            _PopupSliderRow(
+              label: '角度',
+              value: radialOffsetDegreesB,
+              min: -180,
+              max: 180,
+              divisions: 360,
+              valueText: radialOffsetDegreesB.round().toString(),
+              onChanged: drawing.setRadialOffsetAngleB,
+            ),
+            _PopupSliderRow(
+              label: '長さ',
+              value: radialLengthB,
+              min: 0,
+              max: 100,
+              divisions: 100,
+              valueText: radialLengthB.round().toString(),
+              onChanged: (value) =>
+                  drawing.setLinesStartPointRatioB(value / 100.0),
             ),
             const SizedBox(height: 10),
             SizedBox(
@@ -124,10 +191,35 @@ class RadialToolPopup extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                child: const Text('\u78ba\u5b9a'),
+                child: const Text('確定'),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PopupSectionTitle extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _PopupSectionTitle({
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: color,
         ),
       ),
     );
@@ -160,11 +252,11 @@ class _PopupSliderRow extends StatelessWidget {
     return Opacity(
       opacity: enabled ? 1.0 : 0.45,
       child: SizedBox(
-        height: 42,
+        height: 40,
         child: Row(
           children: [
             SizedBox(
-              width: 28,
+              width: 34,
               child: Text(
                 label,
                 style: const TextStyle(fontSize: 11),
@@ -188,7 +280,7 @@ class _PopupSliderRow extends StatelessWidget {
               ),
             ),
             SizedBox(
-              width: 32,
+              width: 38,
               child: Text(
                 valueText,
                 textAlign: TextAlign.right,

@@ -125,8 +125,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                       radialPreviewCenter: drawing.radialPreviewCenter,
                       radialPreviewStartAngle: drawing.radialPreviewStartAngle,
                       radialPreviewSweepAngle: drawing.radialPreviewSweepAngle,
-                      radialPreviewLineCount: drawing.radialPreviewLineCount,
                       radialPreviewRadius: drawing.radialPreviewRadius,
+                      radialLineCountA: drawing.radialLineCountA,
+                      radialLineCountB: drawing.radialLineCountB,
+                      radialOffsetAngleA: drawing.radialOffsetAngleA,
+                      radialOffsetAngleB: drawing.radialOffsetAngleB,
                       canvasRevision: drawing.canvasRevision,
                       layerContentRevision: drawing.layerContentRevision,
                       canvasSize: logicalSize,
@@ -296,6 +299,29 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     return (points[0] - points[1]).distance;
   }
 
+  Offset _twoFingerCanvasFocalPoint() {
+    final points = _activeTouchPoints.values
+        .take(2)
+        .map(_toCanvasPosition)
+        .toList(growable: false);
+    return Offset(
+      (points[0].dx + points[1].dx) / 2,
+      (points[0].dy + points[1].dy) / 2,
+    );
+  }
+
+  double _twoFingerCanvasDistance() {
+    final points = _activeTouchPoints.values
+        .take(2)
+        .map(_toCanvasPosition)
+        .toList(growable: false);
+    return (points[0] - points[1]).distance;
+  }
+
+  bool _isRadialPreviewInteractive(DrawingProvider drawing) {
+    return drawing.currentTool == ToolType.radial && drawing.hasRadialPreview;
+  }
+
   void _cancelDrawingForTwoFinger(DrawingProvider drawing) {
     _clearStrokeResumeState();
     _dragState = null;
@@ -304,6 +330,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _activeDrawPointerKind = null;
     _pendingDrawStart = null;
     _activeDrawStarted = false;
+    if (_isRadialPreviewInteractive(drawing)) {
+      return;
+    }
     drawing.cancelActiveInputGesture();
   }
 
@@ -473,8 +502,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         _pendingDrawStart = null;
         return false;
       }
-      drawing.startRadialPreview(pos);
+      if (!drawing.hasRadialPreview) {
+        drawing.startRadialPreview(pos);
+      }
       _activeDrawStarted = true;
+      _pendingDrawStart = null;
       _syncIgnoreDrawingGestures();
       return true;
     }
@@ -515,8 +547,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     } else if (event.kind == ui.PointerDeviceKind.touch) {
       _activeTouchPoints[event.pointer] = event.position;
       if (_isTwoFingerTouchActive) {
-        _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
-        _lastTwoFingerDistance = _twoFingerDistance();
+        if (_isRadialPreviewInteractive(drawing)) {
+          _lastTwoFingerFocalPoint = _twoFingerCanvasFocalPoint();
+          _lastTwoFingerDistance = _twoFingerCanvasDistance();
+        } else {
+          _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
+          _lastTwoFingerDistance = _twoFingerDistance();
+        }
         _cancelDrawingForTwoFinger(drawing);
         _syncIgnoreDrawingGestures();
         return;
@@ -585,19 +622,16 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           drawing.extendLasso(pos);
         }
       } else if (drawing.currentTool == ToolType.radial) {
-        final Offset? center = _pendingDrawStart;
-        if (center == null) {
+        final Offset? center = drawing.radialPreviewCenter;
+        final Offset? lastOffset = _lastOffset;
+        if (center == null || lastOffset == null) {
+          _lastOffset = pos;
           return;
         }
-        if (!isInsideCanvas) {
-          final Offset? edgePoint = _canvasExitIntersection(center, pos);
-          if (edgePoint != null) {
-            drawing.updateRadialPreview(edgePoint);
-            _lastOffset = edgePoint;
-          }
-          return;
+        final Offset delta = pos - lastOffset;
+        if (delta != Offset.zero) {
+          drawing.transformRadialPreview(center: center + delta);
         }
-        drawing.updateRadialPreview(pos);
       } else {
         if (!isInsideCanvas) {
           final Offset? lastInside = _lastOffset;
@@ -643,6 +677,33 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _activeTouchPoints[event.pointer] = event.position;
     if (_activeSelectionPointer != null) return;
     if (_isTwoFingerTouchActive) {
+      if (_isRadialPreviewInteractive(drawing)) {
+        final Offset focal = _twoFingerCanvasFocalPoint();
+        final double distance = _twoFingerCanvasDistance();
+        Offset? nextCenter;
+        double? nextRadius;
+        if (_lastTwoFingerFocalPoint != null &&
+            drawing.radialPreviewCenter != null) {
+          nextCenter = drawing.radialPreviewCenter! +
+              (focal - _lastTwoFingerFocalPoint!);
+        }
+        if (_lastTwoFingerDistance != null &&
+            _lastTwoFingerDistance! > 0 &&
+            distance > 0) {
+          final double scaleDelta = distance / _lastTwoFingerDistance!;
+          if (scaleDelta.isFinite && scaleDelta > 0) {
+            nextRadius = drawing.radialPreviewRadius * scaleDelta;
+          }
+        }
+        drawing.transformRadialPreview(
+          center: nextCenter,
+          radius: nextRadius,
+        );
+        _lastTwoFingerFocalPoint = focal;
+        _lastTwoFingerDistance = distance;
+        return;
+      }
+
       final focal = _twoFingerFocalPoint();
       final distance = _twoFingerDistance();
       if (_lastTwoFingerFocalPoint != null) {
@@ -714,8 +775,13 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
     _activeTouchPoints.remove(event.pointer);
     if (_isTwoFingerTouchActive) {
-      _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
-      _lastTwoFingerDistance = _twoFingerDistance();
+      if (_isRadialPreviewInteractive(drawing)) {
+        _lastTwoFingerFocalPoint = _twoFingerCanvasFocalPoint();
+        _lastTwoFingerDistance = _twoFingerCanvasDistance();
+      } else {
+        _lastTwoFingerFocalPoint = _twoFingerFocalPoint();
+        _lastTwoFingerDistance = _twoFingerDistance();
+      }
     } else {
       _lastTwoFingerFocalPoint = null;
       _lastTwoFingerDistance = null;
@@ -1064,8 +1130,11 @@ class DrawingPainter extends CustomPainter {
   final Offset? radialPreviewCenter;
   final double? radialPreviewStartAngle;
   final double radialPreviewSweepAngle;
-  final int radialPreviewLineCount;
   final double radialPreviewRadius;
+  final int radialLineCountA;
+  final int radialLineCountB;
+  final double radialOffsetAngleA;
+  final double radialOffsetAngleB;
   final int canvasRevision;
   final int layerContentRevision;
   final Size canvasSize;
@@ -1104,8 +1173,11 @@ class DrawingPainter extends CustomPainter {
     required this.radialPreviewCenter,
     required this.radialPreviewStartAngle,
     required this.radialPreviewSweepAngle,
-    required this.radialPreviewLineCount,
     required this.radialPreviewRadius,
+    required this.radialLineCountA,
+    required this.radialLineCountB,
+    required this.radialOffsetAngleA,
+    required this.radialOffsetAngleB,
     required this.canvasRevision,
     required this.layerContentRevision,
     required this.canvasSize,
@@ -1451,25 +1523,6 @@ class DrawingPainter extends CustomPainter {
       gapLength: 5,
     );
 
-    final double? startAngle = radialPreviewStartAngle;
-    if (startAngle == null) {
-      return;
-    }
-
-    final double currentAngle = startAngle + (radialPreviewSweepAngle / 2.0);
-    final Offset currentPoint = _pointAlongAngle(
-      center,
-      currentAngle,
-      radialPreviewRadius,
-    );
-    canvas.drawLine(
-      center,
-      currentPoint,
-      Paint()
-        ..color = const Color(0xFF34C7FF)
-        ..strokeWidth = 1.4,
-    );
-
     for (final _RadialPreviewSegment segment in _buildRadialPreviewSegments()) {
       canvas.drawLine(
         segment.start,
@@ -1490,19 +1543,57 @@ class DrawingPainter extends CustomPainter {
     if (center == null ||
         startAngle == null ||
         radialPreviewRadius <= 0.0 ||
-        radialPreviewLineCount <= 0) {
+        radialPreviewSweepAngle <= 0.0) {
       return const <_RadialPreviewSegment>[];
     }
 
     final List<_RadialPreviewSegment> segments = <_RadialPreviewSegment>[];
-    for (int index = 0; index < radialPreviewLineCount; index++) {
-      final double t = radialPreviewLineCount == 1
-          ? 0.0
-          : index / (radialPreviewLineCount - 1);
-      final double angle = startAngle + radialPreviewSweepAngle * t;
-      final int groupIndex = index % 2;
-      final double startRadius = radialPreviewRadius *
-          (1.0 - _radialVisibleLengthRatioForIndex(index));
+    segments.addAll(
+      _buildRadialPreviewSegmentsForGroup(
+        center: center,
+        startAngle: startAngle,
+        lineCount: radialLineCountA,
+        visibleLengthRatio: linesStartPointRatioA,
+        offsetAngle: radialOffsetAngleA,
+        groupIndex: 0,
+        shiftHalfStep: false,
+      ),
+    );
+    segments.addAll(
+      _buildRadialPreviewSegmentsForGroup(
+        center: center,
+        startAngle: startAngle,
+        lineCount: radialLineCountB,
+        visibleLengthRatio: linesStartPointRatioB,
+        offsetAngle: radialOffsetAngleB,
+        groupIndex: 1,
+        shiftHalfStep: true,
+      ),
+    );
+    return segments;
+  }
+
+  List<_RadialPreviewSegment> _buildRadialPreviewSegmentsForGroup({
+    required Offset center,
+    required double startAngle,
+    required int lineCount,
+    required double visibleLengthRatio,
+    required double offsetAngle,
+    required int groupIndex,
+    required bool shiftHalfStep,
+  }) {
+    if (lineCount <= 0) {
+      return const <_RadialPreviewSegment>[];
+    }
+
+    final List<_RadialPreviewSegment> segments = <_RadialPreviewSegment>[];
+    final double step = radialPreviewSweepAngle / lineCount;
+    final double basePhase = shiftHalfStep ? step / 2.0 : 0.0;
+    final double startRadius =
+        radialPreviewRadius * (1.0 - visibleLengthRatio.clamp(0.0, 1.0));
+    for (int index = 0; index < lineCount; index++) {
+      final double angle =
+          startAngle + basePhase + (step * index) + offsetAngle;
       final Offset end = _clampRayToCanvas(
         center,
         _pointAlongAngle(center, angle, radialPreviewRadius),
@@ -1522,15 +1613,6 @@ class DrawingPainter extends CustomPainter {
       );
     }
     return segments;
-  }
-
-  double _radialVisibleLengthRatioForIndex(int index) {
-    switch (index % 2) {
-      case 0:
-        return linesStartPointRatioA;
-      default:
-        return linesStartPointRatioB;
-    }
   }
 
   Offset _pointAlongAngle(Offset center, double angle, double radius) {
