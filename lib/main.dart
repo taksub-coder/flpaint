@@ -71,7 +71,8 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage>
+    with WidgetsBindingObserver {
   static const double _canvasViewportPadding = 500.0;
 
   final TransformationController _transformationController =
@@ -85,6 +86,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _alignToTopLeft();
@@ -94,8 +96,15 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _transformationController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    if (!mounted) return;
+    context.read<DrawingProvider>().optimizeMemoryForEmergency();
   }
 
   void _alignToTopLeft() {
