@@ -81,6 +81,38 @@ class LayerCompositePainter {
     }
   }
 
+  static void _paintRasterImage(
+    Canvas canvas,
+    ui.Image image,
+    Rect dstRect, {
+    required RasterSamplingMode sampling,
+  }) {
+    final Paint paint = Paint()
+      ..isAntiAlias = sampling == RasterSamplingMode.smooth
+      ..filterQuality = sampling == RasterSamplingMode.smooth
+          ? FilterQuality.high
+          : FilterQuality.none;
+    final bool keepsNativePixels =
+        (dstRect.width - image.width.toDouble()).abs() < 0.001 &&
+            (dstRect.height - image.height.toDouble()).abs() < 0.001;
+    if (keepsNativePixels) {
+      canvas.drawImage(image, dstRect.topLeft, paint);
+      return;
+    }
+
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(
+        0,
+        0,
+        image.width.toDouble(),
+        image.height.toDouble(),
+      ),
+      dstRect,
+      paint,
+    );
+  }
+
   static _LayerCompositeFrameCache _resolveFrameCache({
     required List<DrawnLine> allLines,
     required List<LayerPlacement> allPlacements,
@@ -181,6 +213,7 @@ class LayerCompositePainter {
     Canvas canvas,
     DrawingLayer layer,
     int maxSequence, {
+    required Size canvasSize,
     required List<DrawnLine> allLines,
     required List<LayerPlacement> allPlacements,
     required ui.Image? layerABaseImage,
@@ -212,14 +245,11 @@ class LayerCompositePainter {
         layerBBaseSampling: layerBBaseSampling,
         layerCBaseSampling: layerCBaseSampling,
       );
-      canvas.drawImage(
+      _paintRasterImage(
+        canvas,
         layerBaseImage,
-        Offset.zero,
-        Paint()
-          ..isAntiAlias = false
-          ..filterQuality = baseSampling == RasterSamplingMode.smooth
-              ? FilterQuality.high
-              : FilterQuality.none,
+        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
+        sampling: baseSampling,
       );
     }
 
@@ -294,6 +324,7 @@ class LayerCompositePainter {
         paintPlacement(
           canvas,
           nextPlacement,
+          canvasSize: canvasSize,
           allLines: allLines,
           allPlacements: allPlacements,
           layerABaseImage: layerABaseImage,
@@ -316,6 +347,7 @@ class LayerCompositePainter {
   static void paintPlacement(
     Canvas canvas,
     LayerPlacement placement, {
+    required Size canvasSize,
     required List<DrawnLine> allLines,
     required List<LayerPlacement> allPlacements,
     required ui.Image? layerABaseImage,
@@ -343,6 +375,7 @@ class LayerCompositePainter {
         canvas,
         placement.vectorSourceLayer!,
         placement.vectorMaxSequence!,
+        canvasSize: canvasSize,
         allLines: allLines,
         allPlacements: allPlacements,
         layerABaseImage: layerABaseImage,
@@ -386,6 +419,7 @@ class LayerCompositePainter {
   static void paintLassoSelection(
     Canvas canvas,
     LassoSelection selection, {
+    required Size canvasSize,
     required List<DrawnLine> allLines,
     required List<LayerPlacement> allPlacements,
     required ui.Image? layerABaseImage,
@@ -433,6 +467,7 @@ class LayerCompositePainter {
       canvas,
       selection.layer,
       selection.maxContentSequence,
+      canvasSize: canvasSize,
       allLines: allLines,
       allPlacements: allPlacements,
       layerABaseImage: layerABaseImage,

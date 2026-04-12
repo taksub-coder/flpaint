@@ -1335,6 +1335,7 @@ class DrawingPainter extends CustomPainter {
       canvas,
       layer,
       kLayerCompositeMaxSequence,
+      canvasSize: canvasSize,
       allLines: allLines,
       allPlacements: placements,
       layerABaseImage: layerABaseImage,
@@ -1357,6 +1358,7 @@ class DrawingPainter extends CustomPainter {
     LayerCompositePainter.paintLassoSelection(
       canvas,
       selection,
+      canvasSize: canvasSize,
       allLines: allLines,
       allPlacements: placements,
       layerABaseImage: layerABaseImage,

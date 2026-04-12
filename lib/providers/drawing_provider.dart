@@ -1154,6 +1154,18 @@ class DrawingProvider extends ChangeNotifier {
       frame.image,
       canvasSize,
     );
+    final bool importFillsCanvas = _rectFillsCanvas(dstRect, canvasSize);
+    final bool canUseImportedImageDirectly =
+        importFillsCanvas && !_layerHasCommittedContent(_activeLayer);
+    if (canUseImportedImageDirectly) {
+      _setLayerBaseImage(
+        _activeLayer,
+        frame.image,
+        sampling: RasterSamplingMode.pixelated,
+      );
+      notifyListeners();
+      return;
+    }
     final ui.Image merged = await _mergeImportedImageIntoLayerBase(
       _activeLayer,
       frame.image,
@@ -1163,15 +1175,25 @@ class DrawingProvider extends ChangeNotifier {
     _setLayerBaseImage(
       _activeLayer,
       merged,
-      sampling: _rasterImageSampling,
+      sampling: importFillsCanvas
+          ? RasterSamplingMode.pixelated
+          : _rasterImageSampling,
     );
     notifyListeners();
   }
 
   Future<void> exportImageFromDialog({BuildContext? context}) async {
+    final double exportScale = _exportPixelRatio(context);
+    final Size exportSize = Size(
+      _ioCanvasSize.width * exportScale,
+      _ioCanvasSize.height * exportScale,
+    );
     if (Platform.isAndroid) {
       final bool exportJpeg = await _selectAndroidExportIsJpeg(context);
-      final ui.Image merged = await _renderExportImage(_ioCanvasSize);
+      final ui.Image merged = await _renderExportImage(
+        exportSize,
+        logicalSize: _ioCanvasSize,
+      );
       final Uint8List? encoded = await _encodeExportImage(
         merged,
         exportJpeg: exportJpeg,
@@ -1189,7 +1211,10 @@ class DrawingProvider extends ChangeNotifier {
       return;
     }
 
-    final ui.Image merged = await _renderExportImage(_ioCanvasSize);
+    final ui.Image merged = await _renderExportImage(
+      exportSize,
+      logicalSize: _ioCanvasSize,
+    );
 
     if (Platform.isWindows) {
       if (context != null && !context.mounted) return;
@@ -1308,12 +1333,75 @@ class DrawingProvider extends ChangeNotifier {
     return Rect.fromLTWH(0, 0, srcW * scale, srcH * scale);
   }
 
+  bool _rectFillsCanvas(Rect rect, Size canvasSize) {
+    return rect.left.abs() < 0.001 &&
+        rect.top.abs() < 0.001 &&
+        (rect.width - canvasSize.width).abs() < 0.001 &&
+        (rect.height - canvasSize.height).abs() < 0.001;
+  }
+
+  bool _layerHasCommittedContent(DrawingLayer layer) {
+    if (switch (layer) {
+          DrawingLayer.layerA => _layerABaseImage,
+          DrawingLayer.layerB => _layerBBaseImage,
+          DrawingLayer.layerC => _layerCBaseImage,
+        } !=
+        null) {
+      return true;
+    }
+    for (final DrawnLine line in _lines) {
+      if (line.layer == layer) {
+        return true;
+      }
+    }
+    for (final LayerPlacement placement in _placements) {
+      if (placement.sourceLayer == layer || placement.targetLayer == layer) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _drawRasterImageToRect(
+    Canvas canvas,
+    ui.Image image,
+    Rect dstRect, {
+    required RasterSamplingMode sampling,
+  }) {
+    final Paint paint = Paint()
+      ..isAntiAlias = sampling == RasterSamplingMode.smooth
+      ..filterQuality = sampling == RasterSamplingMode.smooth
+          ? FilterQuality.high
+          : FilterQuality.none;
+    final bool keepsNativePixels =
+        (dstRect.width - image.width.toDouble()).abs() < 0.001 &&
+            (dstRect.height - image.height.toDouble()).abs() < 0.001;
+    if (keepsNativePixels) {
+      canvas.drawImage(image, dstRect.topLeft, paint);
+      return;
+    }
+
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(
+        0,
+        0,
+        image.width.toDouble(),
+        image.height.toDouble(),
+      ),
+      dstRect,
+      paint,
+    );
+  }
+
   Future<ui.Image> _mergeImportedImageIntoLayerBase(
     DrawingLayer layer,
     ui.Image importImage,
     Rect dstRect,
     Size canvasSize,
   ) async {
+    final Rect canvasRect =
+        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height);
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
@@ -1323,47 +1411,75 @@ class DrawingProvider extends ChangeNotifier {
       DrawingLayer.layerB => _layerBBaseImage,
       DrawingLayer.layerC => _layerCBaseImage,
     };
+    final bool importFillsCanvas = _rectFillsCanvas(dstRect, canvasSize);
+    final bool keepNativeResolution = importFillsCanvas &&
+        (importImage.width != canvasSize.width.ceil() ||
+            importImage.height != canvasSize.height.ceil() ||
+            (layerBaseImage != null &&
+                (layerBaseImage.width != canvasSize.width.ceil() ||
+                    layerBaseImage.height != canvasSize.height.ceil())));
+    final int outputWidth = keepNativeResolution
+        ? math.max(canvasSize.width.ceil(),
+            math.max(importImage.width, layerBaseImage?.width ?? 0))
+        : canvasSize.width.ceil();
+    final int outputHeight = keepNativeResolution
+        ? math.max(
+            canvasSize.height.ceil(),
+            math.max(importImage.height, layerBaseImage?.height ?? 0),
+          )
+        : canvasSize.height.ceil();
+    canvas.scale(
+      outputWidth / canvasSize.width,
+      outputHeight / canvasSize.height,
+    );
 
     if (layerBaseImage != null) {
-      canvas.drawImage(
+      _drawRasterImageToRect(
+        canvas,
         layerBaseImage,
-        Offset.zero,
-        Paint()
-          ..isAntiAlias = false
-          ..filterQuality =
-              _layerBaseSamplingFor(layer) == RasterSamplingMode.smooth
-                  ? FilterQuality.high
-                  : FilterQuality.none,
+        canvasRect,
+        sampling: _layerBaseSamplingFor(layer),
       );
     }
 
-    canvas.drawImageRect(
+    _drawRasterImageToRect(
+      canvas,
       importImage,
-      Rect.fromLTWH(
-        0,
-        0,
-        importImage.width.toDouble(),
-        importImage.height.toDouble(),
-      ),
       dstRect,
-      Paint()
-        ..isAntiAlias = true
-        ..filterQuality = FilterQuality.high,
+      sampling: importFillsCanvas
+          ? RasterSamplingMode.pixelated
+          : _rasterImageSampling,
     );
 
     final picture = recorder.endRecording();
-    return picture.toImage(canvasSize.width.ceil(), canvasSize.height.ceil());
+    return picture.toImage(outputWidth, outputHeight);
   }
 
-  Future<ui.Image> _renderExportImage(Size size) async {
+  double _exportPixelRatio(BuildContext? context) {
+    final ui.FlutterView? view = context != null
+        ? View.maybeOf(context)
+        : (WidgetsBinding.instance.platformDispatcher.views.isEmpty
+            ? null
+            : WidgetsBinding.instance.platformDispatcher.views.first);
+    return (view?.devicePixelRatio ?? 1.0).clamp(1.0, 4.0).toDouble();
+  }
+
+  Future<ui.Image> _renderExportImage(
+    Size outputSize, {
+    Size logicalSize = _ioCanvasSize,
+  }) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
+    canvas.scale(
+      outputSize.width / logicalSize.width,
+      outputSize.height / logicalSize.height,
+    );
 
     if (_isLayerAVisible && _layerAOpacity > 0) {
       _paintLayerCompositeForExport(
         canvas,
-        size,
+        logicalSize,
         DrawingLayer.layerA,
         _layerAOpacity,
       );
@@ -1371,7 +1487,7 @@ class DrawingProvider extends ChangeNotifier {
     if (_isLayerBVisible && _layerBOpacity > 0) {
       _paintLayerCompositeForExport(
         canvas,
-        size,
+        logicalSize,
         DrawingLayer.layerB,
         _layerBOpacity,
       );
@@ -1379,14 +1495,14 @@ class DrawingProvider extends ChangeNotifier {
     if (_isLayerCVisible && _layerCOpacity > 0) {
       _paintLayerCompositeForExport(
         canvas,
-        size,
+        logicalSize,
         DrawingLayer.layerC,
         _layerCOpacity,
       );
     }
 
     final picture = recorder.endRecording();
-    return picture.toImage(size.width.ceil(), size.height.ceil());
+    return picture.toImage(outputSize.width.ceil(), outputSize.height.ceil());
   }
 
   void _paintLayerCompositeForExport(
@@ -3224,10 +3340,12 @@ class DrawingProvider extends ChangeNotifier {
     Canvas canvas,
     DrawingLayer layer,
   ) {
+    final Size size = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
     LayerCompositePainter.paintSourceContentsUpTo(
       canvas,
       layer,
       kLayerCompositeMaxSequence,
+      canvasSize: size,
       allLines: _lines,
       allPlacements: _placements,
       layerABaseImage: _layerABaseImage,
@@ -3256,9 +3374,11 @@ class DrawingProvider extends ChangeNotifier {
     Canvas canvas,
     LassoSelection selection,
   ) {
+    final Size size = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
     LayerCompositePainter.paintLassoSelection(
       canvas,
       selection,
+      canvasSize: size,
       allLines: _lines,
       allPlacements: _placements,
       layerABaseImage: _layerABaseImage,
