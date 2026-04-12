@@ -29,6 +29,7 @@ enum DrawingLayer {
 enum SelectionHandle {
   none,
   inside,
+  rotate,
   mirror,
   cornerTL,
   cornerTR,

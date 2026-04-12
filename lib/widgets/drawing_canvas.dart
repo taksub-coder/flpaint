@@ -50,6 +50,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   ToolType? _strokeResumeTool;
   DateTime? _lastFlipTime;
   Offset? _tapDownPosition;
+  Offset? _lastLassoOutsidePosition;
+  bool _isTrackingLassoOutsideCanvas = false;
   static const Duration _flipDebounceDuration = Duration(milliseconds: 500);
   static const Duration _strokeResumeGraceDuration =
       Duration(milliseconds: 700);
@@ -191,6 +193,11 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _strokeResumeTool = null;
   }
 
+  void _resetLassoBoundaryTracking() {
+    _lastLassoOutsidePosition = null;
+    _isTrackingLassoOutsideCanvas = false;
+  }
+
   void _finalizePendingStrokeResume(DrawingProvider drawing) {
     if (!_hasPendingStrokeResume || _activeDrawPointer != null) return;
     _clearStrokeResumeState();
@@ -324,6 +331,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   void _cancelDrawingForTwoFinger(DrawingProvider drawing) {
     _clearStrokeResumeState();
+    _resetLassoBoundaryTracking();
     _dragState = null;
     _lastOffset = null;
     _activeDrawPointer = null;
@@ -414,6 +422,59 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     );
   }
 
+  Offset _projectPointToCanvasBounds(Offset position) {
+    final Size size = _canvasSize ?? widget.logicalCanvasSize ?? Size.zero;
+    if (size == Size.zero) return position;
+    return Offset(
+      position.dx.clamp(0.0, size.width).toDouble(),
+      position.dy.clamp(0.0, size.height).toDouble(),
+    );
+  }
+
+  void _appendLassoPointIfNeeded(DrawingProvider drawing, Offset point) {
+    final Offset? lastPoint = _lastOffset;
+    if (lastPoint != null && (point - lastPoint).distance < 0.5) {
+      return;
+    }
+    if (!drawing.isDrawingLasso) {
+      drawing.startLasso(point);
+      _activeDrawStarted = true;
+    } else {
+      drawing.extendLasso(point);
+    }
+    _lastOffset = point;
+  }
+
+  void _trackLassoPointer(Offset position, DrawingProvider drawing) {
+    final bool isInsideCanvas = _isInsideCanvas(position);
+    if (isInsideCanvas) {
+      if (_isTrackingLassoOutsideCanvas && _lastLassoOutsidePosition != null) {
+        final Offset entryPoint =
+            _canvasExitIntersection(position, _lastLassoOutsidePosition!) ??
+                _projectPointToCanvasBounds(_lastLassoOutsidePosition!);
+        _appendLassoPointIfNeeded(drawing, entryPoint);
+      }
+      _appendLassoPointIfNeeded(drawing, position);
+      _resetLassoBoundaryTracking();
+      return;
+    }
+    if (!drawing.isDrawingLasso && !_activeDrawStarted) {
+      return;
+    }
+    final Offset boundaryPoint;
+    if (_isTrackingLassoOutsideCanvas) {
+      boundaryPoint = _projectPointToCanvasBounds(position);
+    } else if (_lastOffset != null) {
+      boundaryPoint = _canvasExitIntersection(_lastOffset!, position) ??
+          _projectPointToCanvasBounds(position);
+    } else {
+      boundaryPoint = _projectPointToCanvasBounds(position);
+    }
+    _appendLassoPointIfNeeded(drawing, boundaryPoint);
+    _isTrackingLassoOutsideCanvas = true;
+    _lastLassoOutsidePosition = position;
+  }
+
   void _syncIgnoreDrawingGestures() {
     final bool shouldIgnore = _isTwoFingerTouchActive ||
         _activeSecondaryPointer != null ||
@@ -448,17 +509,6 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     );
     if (handle == SelectionHandle.none) {
       return false;
-    }
-    if (handle == SelectionHandle.mirror) {
-      final now = DateTime.now();
-      if (_lastFlipTime == null ||
-          now.difference(_lastFlipTime!) > _flipDebounceDuration) {
-        drawing.flipSelectionHorizontal();
-        _lastFlipTime = now;
-      }
-      _dragState = null;
-      _setSelectionHandleInteraction(true, pointer: event.pointer);
-      return true;
     }
 
     drawing.beginSelectionInteraction();
@@ -511,6 +561,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       return true;
     }
     if (drawing.currentTool == ToolType.lasso && _isInsideCanvas(pos)) {
+      _resetLassoBoundaryTracking();
       drawing.startLasso(pos);
       _activeDrawStarted = true;
     }
@@ -611,16 +662,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       );
       final bool isInsideCanvas = _isInsideCanvas(pos);
       if (drawing.currentTool == ToolType.lasso) {
-        if (!isInsideCanvas) {
-          _lastOffset = null;
-          return;
-        }
-        if (!drawing.isDrawingLasso) {
-          drawing.startLasso(pos);
-          _activeDrawStarted = true;
-        } else {
-          drawing.extendLasso(pos);
-        }
+        _trackLassoPointer(pos, drawing);
       } else if (drawing.currentTool == ToolType.radial) {
         final Offset? center = drawing.radialPreviewCenter;
         final Offset? lastOffset = _lastOffset;
@@ -746,6 +788,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         if (drawing.isDrawingLasso && _canvasSize != null) {
           drawing.finishLasso(_canvasSize!);
         }
+        _resetLassoBoundaryTracking();
         _dragState = null;
         _activeDrawStarted = false;
         _lastOffset = null;
@@ -809,8 +852,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _tapDownPosition = null;
 
     if (drawing.currentTool == ToolType.lasso && drawing.selection != null) {
-      final handle = drawing.hitTestSelection(pos);
-      if (handle == SelectionHandle.mirror) {
+      if (drawing.isSelectionMirrorButtonHit(pos)) {
         final now = DateTime.now();
         if (_lastFlipTime == null ||
             now.difference(_lastFlipTime!) > _flipDebounceDuration) {
@@ -820,7 +862,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         }
         return;
       }
-      if (handle == SelectionHandle.none &&
+      if (drawing.hitTestSelection(pos) == SelectionHandle.none &&
           drawing.shouldFinishSelection(pos)) {
         await drawing.commitSelection();
       }
@@ -856,12 +898,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     _lastOffset = pos;
     if (drawing.currentTool == ToolType.lasso) {
       if (drawing.selection != null) {
+        if (drawing.isSelectionMirrorButtonHit(pos)) {
+          return;
+        }
         final handle = drawing.hitTestSelection(
           pos,
           handleRadius: 24,
         );
-        if (handle != SelectionHandle.none &&
-            handle != SelectionHandle.mirror) {
+        if (handle != SelectionHandle.none) {
           drawing.beginSelectionInteraction();
           final sel = drawing.selection!;
           _dragState = SelectionDragState(
@@ -878,6 +922,8 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         }
         return;
       }
+      _resetLassoBoundaryTracking();
+      _lastOffset = pos;
       drawing.startLasso(pos);
       return;
     }
@@ -896,7 +942,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     );
     if (drawing.currentTool == ToolType.lasso) {
       if (drawing.isDrawingLasso) {
-        drawing.extendLasso(pos);
+        _trackLassoPointer(pos, drawing);
         return;
       }
       if (_dragState != null && drawing.selection != null) {
@@ -937,6 +983,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       if (drawing.isDrawingLasso && _canvasSize != null) {
         drawing.finishLasso(_canvasSize!);
       }
+      _resetLassoBoundaryTracking();
       _dragState = null;
       return;
     }
@@ -985,6 +1032,21 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
           scaleY: state.initialScaleY,
           rotation: state.initialRotation,
         );
+        break;
+      case SelectionHandle.rotate:
+        final Offset rotationCenter =
+            selection.baseRect.center + state.initialTranslation;
+        final Offset startVector = state.startGlobal - rotationCenter;
+        final Offset currentVector = currentPos - rotationCenter;
+        if (startVector.distance > 0.001 && currentVector.distance > 0.001) {
+          drawing.setSelectionTransform(
+            translation: state.initialTranslation,
+            scaleX: state.initialScaleX,
+            scaleY: state.initialScaleY,
+            rotation: state.initialRotation +
+                _stableAngleDelta(startVector, currentVector),
+          );
+        }
         break;
       case SelectionHandle.mirror:
         // Do nothing on drag

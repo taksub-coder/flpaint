@@ -1532,20 +1532,15 @@ class DrawingProvider extends ChangeNotifier {
     ui.Image image, {
     required bool exportJpeg,
   }) async {
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (data == null) return null;
+    final Uint8List pngBytes = data.buffer.asUint8List();
     if (!exportJpeg) {
-      final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      return data?.buffer.asUint8List();
+      return pngBytes;
     }
 
-    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-    if (data == null) return null;
-    final converted = img.Image.fromBytes(
-      width: image.width,
-      height: image.height,
-      bytes: data.buffer,
-      numChannels: 4,
-      order: img.ChannelOrder.rgba,
-    );
+    final img.Image? converted = img.decodeImage(pngBytes);
+    if (converted == null) return null;
     final whiteBackground = img.Image(width: image.width, height: image.height);
     img.fill(whiteBackground, color: img.ColorRgb8(255, 255, 255));
     img.compositeImage(whiteBackground, converted);
@@ -3180,22 +3175,29 @@ class DrawingProvider extends ChangeNotifier {
       SelectionHandle.cornerBR: corners[2],
       SelectionHandle.cornerBL: corners[3],
     };
-    handles[SelectionHandle.edgeTop] = Offset(
-      (corners[0].dx + corners[1].dx) / 2,
-      (corners[0].dy + corners[1].dy) / 2,
-    );
-    handles[SelectionHandle.edgeRight] = Offset(
-      (corners[1].dx + corners[2].dx) / 2,
-      (corners[1].dy + corners[2].dy) / 2,
-    );
-    handles[SelectionHandle.edgeBottom] = Offset(
-      (corners[2].dx + corners[3].dx) / 2,
-      (corners[2].dy + corners[3].dy) / 2,
-    );
-    handles[SelectionHandle.edgeLeft] = Offset(
-      (corners[3].dx + corners[0].dx) / 2,
-      (corners[3].dy + corners[0].dy) / 2,
-    );
+    const double minimumEdgeHandleSpan = 32.0;
+    final double topEdgeLength = (corners[1] - corners[0]).distance;
+    final double rightEdgeLength = (corners[2] - corners[1]).distance;
+    if (topEdgeLength >= minimumEdgeHandleSpan) {
+      handles[SelectionHandle.edgeTop] = Offset(
+        (corners[0].dx + corners[1].dx) / 2,
+        (corners[0].dy + corners[1].dy) / 2,
+      );
+      handles[SelectionHandle.edgeBottom] = Offset(
+        (corners[2].dx + corners[3].dx) / 2,
+        (corners[2].dy + corners[3].dy) / 2,
+      );
+    }
+    if (rightEdgeLength >= minimumEdgeHandleSpan) {
+      handles[SelectionHandle.edgeRight] = Offset(
+        (corners[1].dx + corners[2].dx) / 2,
+        (corners[1].dy + corners[2].dy) / 2,
+      );
+      handles[SelectionHandle.edgeLeft] = Offset(
+        (corners[3].dx + corners[0].dx) / 2,
+        (corners[3].dy + corners[0].dy) / 2,
+      );
+    }
     // Mirror toggle: fix to visual top-left of the transformed bounds so it doesn't jump when flipped.
     Offset visualTopLeft = corners.first;
     for (final corner in corners.skip(1)) {
@@ -3221,25 +3223,67 @@ class DrawingProvider extends ChangeNotifier {
     _saveState();
   }
 
+  bool isSelectionMirrorButtonHit(Offset position) {
+    if (_selection == null) return false;
+    final Offset? mirrorHandle =
+        _handlePositions(_selection!)[SelectionHandle.mirror];
+    if (mirrorHandle == null) return false;
+    return Rect.fromCenter(
+      center: mirrorHandle,
+      width: 48,
+      height: 40,
+    ).contains(position);
+  }
+
   SelectionHandle hitTestSelection(
     Offset position, {
     double handleRadius = 24,
-    double mirrorRadius = 64,
   }) {
     if (_selection == null) return SelectionHandle.none;
     final handles = _handlePositions(_selection!);
-    if (handles.containsKey(SelectionHandle.mirror) &&
-        (handles[SelectionHandle.mirror]! - position).distance <=
-            mirrorRadius) {
-      return SelectionHandle.mirror;
-    }
+    final double touchTargetSize = math.max(14.0, math.min(handleRadius, 18.0));
+    SelectionHandle nearestHandle = SelectionHandle.none;
+    double nearestDistance = double.infinity;
     for (final entry in handles.entries) {
       if (entry.key == SelectionHandle.mirror) continue;
-      if ((entry.value - position).distance <= handleRadius) {
-        return entry.key;
+      final Rect hitRect = Rect.fromCenter(
+        center: entry.value,
+        width: touchTargetSize,
+        height: touchTargetSize,
+      );
+      if (!hitRect.contains(position)) continue;
+      final double distance = (entry.value - position).distance;
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestHandle = entry.key;
       }
     }
-    if (_selection!.transformedPath().contains(position)) {
+    if (nearestHandle != SelectionHandle.none) {
+      return nearestHandle;
+    }
+    final LassoSelection selection = _selection!;
+    final Offset localPosition = selection.toLocal(position);
+    if (selection.baseRect.contains(localPosition)) {
+      final double nearestEdgeDistance = math.min(
+        math.min(
+          (localPosition.dx - selection.baseRect.left).abs(),
+          (selection.baseRect.right - localPosition.dx).abs(),
+        ),
+        math.min(
+          (localPosition.dy - selection.baseRect.top).abs(),
+          (selection.baseRect.bottom - localPosition.dy).abs(),
+        ),
+      );
+      final double outlineBand = math.max(
+        6.0,
+        math.min(
+          12.0,
+          math.min(selection.baseRect.width, selection.baseRect.height) * 0.15,
+        ),
+      );
+      if (nearestEdgeDistance <= outlineBand) {
+        return SelectionHandle.rotate;
+      }
       return SelectionHandle.inside;
     }
     return SelectionHandle.none;
