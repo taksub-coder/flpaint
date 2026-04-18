@@ -294,6 +294,13 @@ class DrawingProvider extends ChangeNotifier {
   int get canvasRevision => _canvasRevision;
   int get layerContentRevision => _layerContentRevision;
 
+  int get _maxUndoSnapshots =>
+      Platform.isAndroid ? _androidMaxUndoSnapshots : _defaultMaxUndoSnapshots;
+
+  int get _cleanupCommitInterval => Platform.isAndroid
+      ? _androidCleanupCommitInterval
+      : _defaultCleanupCommitInterval;
+
   // Pen dynamics constants
   static const double _jitterDistanceThreshold = 2.4;
   static const double _jitterLerpFactor = 0.25;
@@ -309,6 +316,11 @@ class DrawingProvider extends ChangeNotifier {
   static const Duration _autosaveRetryDelay = Duration(seconds: 30);
   static const RasterSamplingMode _rasterImageSampling =
       RasterSamplingMode.smooth;
+  static const int _autoBakeLineThreshold = 20;
+  static const int _androidMaxUndoSnapshots = 5;
+  static const int _defaultMaxUndoSnapshots = 100;
+  static const int _androidCleanupCommitInterval = 6;
+  static const int _defaultCleanupCommitInterval = 12;
   static const double _minimumRadialRadius = 2.0;
   static const int _radialMinLineCount = 4;
   static const int _radialMaxLineCount = 250;
@@ -386,6 +398,10 @@ class DrawingProvider extends ChangeNotifier {
   })();
   DateTime? _lastPointTime;
   double _lastSpeed = 0.0; // px/ms for current stroke
+  int _committedOperationsSinceCleanup = 0;
+  bool _autoCleanupInProgress = false;
+  bool _autoCleanupPending = false;
+  final Set<ui.Image> _disposedImages = Set<ui.Image>.identity();
 
   DrawingProvider();
 
@@ -393,6 +409,7 @@ class DrawingProvider extends ChangeNotifier {
   void dispose() {
     _autosaveTimer?.cancel();
     _autosaveRetryTimer?.cancel();
+    _disposeAllManagedImages();
     super.dispose();
   }
 
@@ -405,6 +422,155 @@ class DrawingProvider extends ChangeNotifier {
 
   void _notifyUiOnly() {
     super.notifyListeners();
+  }
+
+  Iterable<ui.Image> _trackedImagesInPlacements(
+    Iterable<LayerPlacement> placements,
+  ) sync* {
+    for (final LayerPlacement placement in placements) {
+      final ui.Image? image = placement.rasterImage;
+      if (image != null) {
+        yield image;
+      }
+    }
+  }
+
+  Iterable<ui.Image> _trackedImagesInSelection(
+    LassoSelection? selection,
+  ) sync* {
+    final ui.Image? image = selection?.rasterImage;
+    if (image != null) {
+      yield image;
+    }
+  }
+
+  Iterable<ui.Image> _trackedImagesInSnapshot(
+    _DrawingSnapshot snapshot,
+  ) sync* {
+    final ui.Image? layerA = snapshot.layerABaseImage;
+    if (layerA != null) {
+      yield layerA;
+    }
+    final ui.Image? layerB = snapshot.layerBBaseImage;
+    if (layerB != null) {
+      yield layerB;
+    }
+    final ui.Image? layerC = snapshot.layerCBaseImage;
+    if (layerC != null) {
+      yield layerC;
+    }
+    yield* _trackedImagesInPlacements(snapshot.placements);
+    yield* _trackedImagesInSelection(snapshot.selection);
+  }
+
+  Iterable<ui.Image> _trackedImagesInCurrentState() sync* {
+    final ui.Image? layerA = _layerABaseImage;
+    if (layerA != null) {
+      yield layerA;
+    }
+    final ui.Image? layerB = _layerBBaseImage;
+    if (layerB != null) {
+      yield layerB;
+    }
+    final ui.Image? layerC = _layerCBaseImage;
+    if (layerC != null) {
+      yield layerC;
+    }
+    final ui.Image? clipboard = _clipboardImage;
+    if (clipboard != null) {
+      yield clipboard;
+    }
+    yield* _trackedImagesInPlacements(_placements);
+    yield* _trackedImagesInSelection(_selection);
+  }
+
+  bool _snapshotReferencesImage(
+    _DrawingSnapshot snapshot,
+    ui.Image image,
+  ) {
+    for (final ui.Image candidate in _trackedImagesInSnapshot(snapshot)) {
+      if (identical(candidate, image)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isImageReferencedAnywhere(ui.Image image) {
+    for (final ui.Image candidate in _trackedImagesInCurrentState()) {
+      if (identical(candidate, image)) {
+        return true;
+      }
+    }
+    for (final _DrawingSnapshot snapshot in _undoStack) {
+      if (_snapshotReferencesImage(snapshot, image)) {
+        return true;
+      }
+    }
+    for (final _DrawingSnapshot snapshot in _redoStack) {
+      if (_snapshotReferencesImage(snapshot, image)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _disposeImageIfUnreferenced(ui.Image? image) {
+    if (image == null ||
+        _disposedImages.contains(image) ||
+        _isImageReferencedAnywhere(image)) {
+      return;
+    }
+    image.dispose();
+    _disposedImages.add(image);
+  }
+
+  void _disposeImagesIfUnreferenced(Iterable<ui.Image> images) {
+    final Set<ui.Image> deduped = Set<ui.Image>.identity();
+    deduped.addAll(images);
+    for (final ui.Image image in deduped) {
+      _disposeImageIfUnreferenced(image);
+    }
+  }
+
+  void _disposeSnapshots(Iterable<_DrawingSnapshot> snapshots) {
+    final Set<ui.Image> images = Set<ui.Image>.identity();
+    for (final _DrawingSnapshot snapshot in snapshots) {
+      images.addAll(_trackedImagesInSnapshot(snapshot));
+    }
+    _disposeImagesIfUnreferenced(images);
+  }
+
+  void _disposeAllManagedImages() {
+    final Set<ui.Image> images = Set<ui.Image>.identity();
+    images.addAll(_trackedImagesInCurrentState());
+    for (final _DrawingSnapshot snapshot in _undoStack) {
+      images.addAll(_trackedImagesInSnapshot(snapshot));
+    }
+    for (final _DrawingSnapshot snapshot in _redoStack) {
+      images.addAll(_trackedImagesInSnapshot(snapshot));
+    }
+    for (final ui.Image image in images) {
+      if (_disposedImages.contains(image)) {
+        continue;
+      }
+      image.dispose();
+      _disposedImages.add(image);
+    }
+  }
+
+  void _setClipboardImage(
+    ui.Image? image, {
+    RasterSamplingMode sampling = RasterSamplingMode.smooth,
+  }) {
+    if (identical(_clipboardImage, image) &&
+        _clipboardImageSampling == sampling) {
+      return;
+    }
+    final ui.Image? previous = _clipboardImage;
+    _clipboardImage = image;
+    _clipboardImageSampling = sampling;
+    _disposeImageIfUnreferenced(previous);
   }
 
   void setCanvasSize(Size size) {
@@ -479,6 +645,123 @@ class DrawingProvider extends ChangeNotifier {
       _shapeStart != null ||
       _shapeEnd != null ||
       _radialPreviewCenter != null;
+
+  bool get _canAutoCleanup =>
+      !_hasTransientCanvasActivity && _selection == null && !_backupBusy;
+
+  bool _shouldAutoCleanup({bool force = false}) {
+    if (!_canAutoCleanup) {
+      return false;
+    }
+    final Size targetSize =
+        _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    if (targetSize == Size.zero) {
+      return false;
+    }
+    if (_lines.isEmpty && _placements.isEmpty) {
+      return false;
+    }
+    if (force) {
+      return true;
+    }
+    return _lines.length >= _autoBakeLineThreshold ||
+        _committedOperationsSinceCleanup >= _cleanupCommitInterval;
+  }
+
+  void _registerCommittedOperation({
+    bool forceCleanup = false,
+    bool resetCleanupCounter = false,
+  }) {
+    if (resetCleanupCounter) {
+      _committedOperationsSinceCleanup = 0;
+    } else {
+      _committedOperationsSinceCleanup++;
+    }
+    if (_shouldAutoCleanup(force: forceCleanup)) {
+      unawaited(_scheduleAutoCleanup(force: forceCleanup));
+    }
+  }
+
+  Future<void> _scheduleAutoCleanup({bool force = false}) async {
+    if (_autoCleanupInProgress) {
+      _autoCleanupPending = true;
+      return;
+    }
+    if (!_shouldAutoCleanup(force: force)) {
+      return;
+    }
+
+    _autoCleanupInProgress = true;
+    try {
+      do {
+        _autoCleanupPending = false;
+        final bool cleaned = await _performInternalCanvasCleanup(
+          force: force,
+        );
+        force = false;
+        if (!cleaned) {
+          break;
+        }
+      } while (_autoCleanupPending || _shouldAutoCleanup());
+    } finally {
+      _autoCleanupInProgress = false;
+      if (_autoCleanupPending || _shouldAutoCleanup()) {
+        unawaited(_scheduleAutoCleanup());
+      }
+    }
+  }
+
+  Future<bool> _performInternalCanvasCleanup({bool force = false}) async {
+    if (!_shouldAutoCleanup(force: force)) {
+      return false;
+    }
+
+    final Size targetSize =
+        _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
+    final int revisionAtStart = _canvasRevision;
+    final List<ui.Image> bakedLayers = await Future.wait<ui.Image>(
+      _backupLayers.map((DrawingLayer layer) {
+        return _renderLayerSnapshot(layer, targetSize);
+      }),
+    );
+
+    if (!_canAutoCleanup || revisionAtStart != _canvasRevision) {
+      for (final ui.Image image in bakedLayers) {
+        image.dispose();
+      }
+      return false;
+    }
+
+    final Set<ui.Image> displacedImages = Set<ui.Image>.identity()
+      ..addAll(_trackedImagesInCurrentState());
+
+    _setLayerBaseImage(
+      DrawingLayer.layerA,
+      bakedLayers[0],
+      sampling: _rasterImageSampling,
+    );
+    _setLayerBaseImage(
+      DrawingLayer.layerB,
+      bakedLayers[1],
+      sampling: _rasterImageSampling,
+    );
+    _setLayerBaseImage(
+      DrawingLayer.layerC,
+      bakedLayers[2],
+      sampling: _rasterImageSampling,
+    );
+    _lines.clear();
+    _placements.clear();
+    _committedOperationsSinceCleanup = 0;
+    _markLayerContentChanged();
+    notifyListeners();
+    _disposeImagesIfUnreferenced(displacedImages);
+    if (Platform.isAndroid) {
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    }
+    return true;
+  }
 
   Future<void> _runAutosaveBackupSafely() async {
     try {
@@ -614,7 +897,10 @@ class DrawingProvider extends ChangeNotifier {
         ..filterQuality = FilterQuality.high,
     );
     final downsamplePicture = downsampleRecorder.endRecording();
-    return downsamplePicture.toImage(_toneTileSize, _toneTileSize);
+    final ui.Image downsampled =
+        await downsamplePicture.toImage(_toneTileSize, _toneTileSize);
+    sourceImage.dispose();
+    return downsampled;
   }
 
   void setTool(ToolType tool) {
@@ -693,9 +979,9 @@ class DrawingProvider extends ChangeNotifier {
 
   void setRadialLineCountA(double value) {
     final int clamped = value.round().clamp(
-      _radialMinLineCount,
-      _radialMaxLineCount,
-    );
+          _radialMinLineCount,
+          _radialMaxLineCount,
+        );
     if (_radialLineCountA == clamped) return;
     _radialLineCountA = clamped;
     _syncRadialPreviewLineCount();
@@ -708,9 +994,9 @@ class DrawingProvider extends ChangeNotifier {
 
   void setRadialLineCountB(double value) {
     final int clamped = value.round().clamp(
-      _radialMinLineCount,
-      _radialMaxLineCount,
-    );
+          _radialMinLineCount,
+          _radialMaxLineCount,
+        );
     if (_radialLineCountB == clamped) return;
     _radialLineCountB = clamped;
     _syncRadialPreviewLineCount();
@@ -839,8 +1125,9 @@ class DrawingProvider extends ChangeNotifier {
     if (addedLine) {
       _markLayerContentChanged();
       _tool = ToolType.pen;
+      _registerCommittedOperation();
     } else {
-      _undoStack.removeLast();
+      _disposeSnapshots(<_DrawingSnapshot>[_undoStack.removeLast()]);
     }
     notifyListeners();
   }
@@ -930,7 +1217,8 @@ class DrawingProvider extends ChangeNotifier {
 
   double _defaultRadialPreviewRadius() {
     final Size size = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
-    return math.min(size.width, size.height) * _defaultRadialPreviewRadiusFactor;
+    return math.min(size.width, size.height) *
+        _defaultRadialPreviewRadiusFactor;
   }
 
   void _ensureRadialPreviewInitialized({Offset? center}) {
@@ -1061,6 +1349,8 @@ class DrawingProvider extends ChangeNotifier {
     if (canvasSize == Size.zero) return;
 
     _saveState();
+    final Set<ui.Image> displacedImages = Set<ui.Image>.identity()
+      ..addAll(_trackedImagesInCurrentState());
     final List<ui.Image> snapshots = await Future.wait<ui.Image>(
       _backupLayers.map((DrawingLayer layer) {
         return _renderLayerSnapshot(layer, canvasSize);
@@ -1089,6 +1379,9 @@ class DrawingProvider extends ChangeNotifier {
       canvasSize.width.ceil(),
       canvasSize.height.ceil(),
     );
+    for (final ui.Image snapshot in snapshots) {
+      snapshot.dispose();
+    }
 
     for (final DrawingLayer layer in _backupLayers) {
       _setLayerBaseImage(layer, null);
@@ -1106,8 +1399,10 @@ class DrawingProvider extends ChangeNotifier {
     _lassoPoints.clear();
     _isDrawingLasso = false;
     _resetSelectionState();
+    _committedOperationsSinceCleanup = 0;
     _markLayerContentChanged();
     notifyListeners();
+    _disposeImagesIfUnreferenced(displacedImages);
   }
 
   Future<void> importImageFromDialog() async {
@@ -1163,6 +1458,7 @@ class DrawingProvider extends ChangeNotifier {
         frame.image,
         sampling: RasterSamplingMode.pixelated,
       );
+      _committedOperationsSinceCleanup = 0;
       notifyListeners();
       return;
     }
@@ -1179,6 +1475,8 @@ class DrawingProvider extends ChangeNotifier {
           ? RasterSamplingMode.pixelated
           : _rasterImageSampling,
     );
+    frame.image.dispose();
+    _committedOperationsSinceCleanup = 0;
     notifyListeners();
   }
 
@@ -1194,20 +1492,24 @@ class DrawingProvider extends ChangeNotifier {
         exportSize,
         logicalSize: _ioCanvasSize,
       );
-      final Uint8List? encoded = await _encodeExportImage(
-        merged,
-        exportJpeg: exportJpeg,
-      );
-      if (encoded == null) return;
-      await FlutterFileDialog.saveFile(
-        params: SaveFileDialogParams(
-          data: encoded,
-          fileName: _buildTimestampedExportFileName(exportJpeg: exportJpeg),
-          mimeTypesFilter: [
-            exportJpeg ? 'image/jpeg' : 'image/png',
-          ],
-        ),
-      );
+      try {
+        final Uint8List? encoded = await _encodeExportImage(
+          merged,
+          exportJpeg: exportJpeg,
+        );
+        if (encoded == null) return;
+        await FlutterFileDialog.saveFile(
+          params: SaveFileDialogParams(
+            data: encoded,
+            fileName: _buildTimestampedExportFileName(exportJpeg: exportJpeg),
+            mimeTypesFilter: [
+              exportJpeg ? 'image/jpeg' : 'image/png',
+            ],
+          ),
+        );
+      } finally {
+        merged.dispose();
+      }
       return;
     }
 
@@ -1215,63 +1517,67 @@ class DrawingProvider extends ChangeNotifier {
       exportSize,
       logicalSize: _ioCanvasSize,
     );
+    try {
+      if (Platform.isWindows) {
+        if (context != null && !context.mounted) return;
+        final bool? exportJpeg = await _selectWindowsExportIsJpeg(context);
+        if (exportJpeg == null) return;
+        final FileSaveLocation? location = await getSaveLocation(
+          suggestedName:
+              _buildTimestampedExportFileName(exportJpeg: exportJpeg),
+          acceptedTypeGroups: [
+            exportJpeg
+                ? const XTypeGroup(
+                    label: 'JPEG',
+                    extensions: ['jpg', 'jpeg'],
+                  )
+                : const XTypeGroup(
+                    label: 'PNG',
+                    extensions: ['png'],
+                  ),
+          ],
+        );
+        if (location == null) return;
+        final String savePath = _normalizeExportPathForFormat(
+          location.path,
+          exportJpeg: exportJpeg,
+        );
+        final Uint8List? encoded = await _encodeExportImage(
+          merged,
+          exportJpeg: exportJpeg,
+        );
+        if (encoded == null) return;
+        await File(savePath).writeAsBytes(encoded, flush: true);
+        return;
+      }
 
-    if (Platform.isWindows) {
-      if (context != null && !context.mounted) return;
-      final bool? exportJpeg = await _selectWindowsExportIsJpeg(context);
-      if (exportJpeg == null) return;
       final FileSaveLocation? location = await getSaveLocation(
-        suggestedName: _buildTimestampedExportFileName(exportJpeg: exportJpeg),
-        acceptedTypeGroups: [
-          exportJpeg
-              ? const XTypeGroup(
-                  label: 'JPEG',
-                  extensions: ['jpg', 'jpeg'],
-                )
-              : const XTypeGroup(
-                  label: 'PNG',
-                  extensions: ['png'],
-                ),
+        suggestedName: _buildTimestampedExportFileName(exportJpeg: false),
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'PNG',
+            extensions: ['png'],
+          ),
+          XTypeGroup(
+            label: 'JPEG',
+            extensions: ['jpg', 'jpeg'],
+          ),
         ],
       );
       if (location == null) return;
-      final String savePath = _normalizeExportPathForFormat(
-        location.path,
-        exportJpeg: exportJpeg,
-      );
+      final String savePath = _normalizeExportPath(location.path);
+      final String lower = savePath.toLowerCase();
+      final bool exportJpeg = lower.endsWith('.jpg') || lower.endsWith('.jpeg');
+
       final Uint8List? encoded = await _encodeExportImage(
         merged,
         exportJpeg: exportJpeg,
       );
       if (encoded == null) return;
       await File(savePath).writeAsBytes(encoded, flush: true);
-      return;
+    } finally {
+      merged.dispose();
     }
-
-    final FileSaveLocation? location = await getSaveLocation(
-      suggestedName: _buildTimestampedExportFileName(exportJpeg: false),
-      acceptedTypeGroups: const [
-        XTypeGroup(
-          label: 'PNG',
-          extensions: ['png'],
-        ),
-        XTypeGroup(
-          label: 'JPEG',
-          extensions: ['jpg', 'jpeg'],
-        ),
-      ],
-    );
-    if (location == null) return;
-    final String savePath = _normalizeExportPath(location.path);
-    final String lower = savePath.toLowerCase();
-    final bool exportJpeg = lower.endsWith('.jpg') || lower.endsWith('.jpeg');
-
-    final Uint8List? encoded = await _encodeExportImage(
-      merged,
-      exportJpeg: exportJpeg,
-    );
-    if (encoded == null) return;
-    await File(savePath).writeAsBytes(encoded, flush: true);
   }
 
   Future<bool> _selectAndroidExportIsJpeg(BuildContext? context) async {
@@ -1697,6 +2003,8 @@ class DrawingProvider extends ChangeNotifier {
     ]);
 
     _saveState();
+    final Set<ui.Image> displacedImages = Set<ui.Image>.identity()
+      ..addAll(_trackedImagesInCurrentState());
     _setLayerBaseImage(
       DrawingLayer.layerA,
       images[0],
@@ -1723,8 +2031,10 @@ class DrawingProvider extends ChangeNotifier {
     _shapeStart = null;
     _shapeEnd = null;
     _resetSelectionState();
+    _committedOperationsSinceCleanup = 0;
     _markLayerContentChanged();
     notifyListeners();
+    _disposeImagesIfUnreferenced(displacedImages);
   }
 
   Future<void> _withBackupLock(Future<void> Function() action) async {
@@ -1751,13 +2061,19 @@ class DrawingProvider extends ChangeNotifier {
           .map((DrawingLayer layer) => _renderLayerSnapshot(layer, backupSize)),
     );
 
-    await Future.wait<void>(<Future<void>>[
-      for (int i = 0; i < _backupLayers.length; i++)
-        _writeImageAsPng(
-          layerImages[i],
-          '${directory.path}${Platform.pathSeparator}${_backupFileNameForLayer(baseName, _backupLayers[i], useLatestNames: useLatestNames)}',
-        ),
-    ]);
+    try {
+      await Future.wait<void>(<Future<void>>[
+        for (int i = 0; i < _backupLayers.length; i++)
+          _writeImageAsPng(
+            layerImages[i],
+            '${directory.path}${Platform.pathSeparator}${_backupFileNameForLayer(baseName, _backupLayers[i], useLatestNames: useLatestNames)}',
+          ),
+      ]);
+    } finally {
+      for (final ui.Image image in layerImages) {
+        image.dispose();
+      }
+    }
   }
 
   Future<void> _cleanupAutosaveDirectory() async {
@@ -1876,6 +2192,8 @@ class DrawingProvider extends ChangeNotifier {
 
   void clear() {
     _saveState();
+    final Set<ui.Image> displacedImages = Set<ui.Image>.identity()
+      ..addAll(_trackedImagesInCurrentState());
     _lines.clear();
     _placements.clear();
     _currentLine = null;
@@ -1883,17 +2201,16 @@ class DrawingProvider extends ChangeNotifier {
     _lassoPoints.clear();
     _isDrawingLasso = false;
     _resetSelectionState();
-    _layerABaseImage = null;
-    _layerBBaseImage = null;
-    _layerCBaseImage = null;
-    _layerABaseSampling = RasterSamplingMode.pixelated;
-    _layerBBaseSampling = RasterSamplingMode.pixelated;
-    _layerCBaseSampling = RasterSamplingMode.pixelated;
+    _setLayerBaseImage(DrawingLayer.layerA, null);
+    _setLayerBaseImage(DrawingLayer.layerB, null);
+    _setLayerBaseImage(DrawingLayer.layerC, null);
     _shapeStart = null;
     _shapeEnd = null;
     _clearRadialPreviewState();
+    _committedOperationsSinceCleanup = 0;
     _markLayerContentChanged();
     notifyListeners();
+    _disposeImagesIfUnreferenced(displacedImages);
   }
 
   double _layerOpacityFor(DrawingLayer layer) {
@@ -1951,6 +2268,11 @@ class DrawingProvider extends ChangeNotifier {
     ui.Image? image, {
     RasterSamplingMode sampling = RasterSamplingMode.pixelated,
   }) {
+    final ui.Image? previous = switch (layer) {
+      DrawingLayer.layerA => _layerABaseImage,
+      DrawingLayer.layerB => _layerBBaseImage,
+      DrawingLayer.layerC => _layerCBaseImage,
+    };
     switch (layer) {
       case DrawingLayer.layerA:
         _layerABaseImage = image;
@@ -1968,6 +2290,9 @@ class DrawingProvider extends ChangeNotifier {
             image == null ? RasterSamplingMode.pixelated : sampling;
         break;
     }
+    if (!identical(previous, image)) {
+      _disposeImageIfUnreferenced(previous);
+    }
   }
 
   void _clearLayerLines(DrawingLayer layer) {
@@ -1982,6 +2307,38 @@ class DrawingProvider extends ChangeNotifier {
     _layerContentRevision++;
   }
 
+  void _trimUndoStackIfNeeded() {
+    final int overflow = _undoStack.length - _maxUndoSnapshots;
+    if (overflow <= 0) {
+      return;
+    }
+    final List<_DrawingSnapshot> discarded =
+        _undoStack.sublist(0, overflow).toList(growable: false);
+    _undoStack.removeRange(0, overflow);
+    _disposeSnapshots(discarded);
+  }
+
+  void _trimRedoStackIfNeeded() {
+    final int overflow = _redoStack.length - _maxUndoSnapshots;
+    if (overflow <= 0) {
+      return;
+    }
+    final List<_DrawingSnapshot> discarded =
+        _redoStack.sublist(0, overflow).toList(growable: false);
+    _redoStack.removeRange(0, overflow);
+    _disposeSnapshots(discarded);
+  }
+
+  void _clearRedoStack() {
+    if (_redoStack.isEmpty) {
+      return;
+    }
+    final List<_DrawingSnapshot> discarded =
+        List<_DrawingSnapshot>.from(_redoStack, growable: false);
+    _redoStack.clear();
+    _disposeSnapshots(discarded);
+  }
+
   // ==========================================
   // パフォーマンス回復のためのメモリ解放メソッド
   // ==========================================
@@ -1990,15 +2347,23 @@ class DrawingProvider extends ChangeNotifier {
       '🚨 [flpaint_プロトタイプ2.1C] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
     );
 
-    _redoStack.clear();
+    _clearRedoStack();
 
-    const int maxUndoToKeep = 3;
+    final int maxUndoToKeep = Platform.isAndroid ? 3 : 10;
     if (_undoStack.length > maxUndoToKeep) {
+      final List<_DrawingSnapshot> discarded = _undoStack
+          .sublist(0, _undoStack.length - maxUndoToKeep)
+          .toList(growable: false);
       _undoStack.removeRange(0, _undoStack.length - maxUndoToKeep);
+      _disposeSnapshots(discarded);
     }
 
     PaintingBinding.instance.imageCache.clear();
     PaintingBinding.instance.imageCache.clearLiveImages();
+
+    if (_shouldAutoCleanup(force: true)) {
+      unawaited(_scheduleAutoCleanup(force: true));
+    }
 
     debugPrint(
       '✅ [flpaint_プロトタイプ2.1C] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
@@ -2105,21 +2470,25 @@ class DrawingProvider extends ChangeNotifier {
   void undo() {
     if (_undoStack.isEmpty) return;
     _redoStack.add(_createSnapshot());
+    _trimRedoStackIfNeeded();
     _restoreSnapshot(_undoStack.removeLast());
+    _registerCommittedOperation();
     notifyListeners();
   }
 
   void redo() {
     if (_redoStack.isEmpty) return;
     _undoStack.add(_createSnapshot());
+    _trimUndoStackIfNeeded();
     _restoreSnapshot(_redoStack.removeLast());
+    _registerCommittedOperation();
     notifyListeners();
   }
 
   void _saveState() {
     _undoStack.add(_createSnapshot());
-    if (_undoStack.length > 100) _undoStack.removeAt(0);
-    _redoStack.clear();
+    _trimUndoStackIfNeeded();
+    _clearRedoStack();
   }
 
   int _takeNextSequence() => _nextSequence++;
@@ -2143,6 +2512,8 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   void _restoreSnapshot(_DrawingSnapshot snapshot) {
+    final Set<ui.Image> displacedImages = Set<ui.Image>.identity()
+      ..addAll(_trackedImagesInCurrentState());
     _lines
       ..clear()
       ..addAll(snapshot.lines.map(_cloneLine));
@@ -2161,7 +2532,9 @@ class DrawingProvider extends ChangeNotifier {
     _selectionHandlesFilled = snapshot.selectionHandlesFilled;
     _selectionMergeToActiveLayer = snapshot.selectionMergeToActiveLayer;
     _clearRadialPreviewState();
+    _committedOperationsSinceCleanup = 0;
     _markLayerContentChanged();
+    _disposeImagesIfUnreferenced(displacedImages);
   }
 
   DrawnLine _cloneLine(DrawnLine src) {
@@ -2342,6 +2715,7 @@ class DrawingProvider extends ChangeNotifier {
     if (_isShapeTool(_tool)) {
       if (_shapeStart != null && _shapeEnd != null) {
         _finalizeShape(_shapeStart!, _shapeEnd!);
+        _registerCommittedOperation();
       }
       _shapeStart = null;
       _shapeEnd = null;
@@ -2359,6 +2733,7 @@ class DrawingProvider extends ChangeNotifier {
     _currentLine!.isFinished = true;
     _currentLine = null;
     _lineStartPoint = null;
+    _registerCommittedOperation();
     notifyListeners();
   }
 
@@ -2648,10 +3023,12 @@ class DrawingProvider extends ChangeNotifier {
         ..filterQuality = FilterQuality.none,
     );
     final cropPicture = cropRecorder.endRecording();
-    return cropPicture.toImage(
+    final ui.Image cropped = await cropPicture.toImage(
       math.max(1, bounds.width.ceil()),
       math.max(1, bounds.height.ceil()),
     );
+    maskedLayer.dispose();
+    return cropped;
   }
 
   Future<void> cutSelectionToClipboard() async {
@@ -2659,13 +3036,16 @@ class DrawingProvider extends ChangeNotifier {
     _saveState();
     final LassoSelection selection = _selection!;
     if (selection.rasterImage != null) {
-      _clipboardImage = selection.rasterImage;
-      _clipboardImageSampling = selection.rasterSampling;
+      _setClipboardImage(
+        selection.rasterImage,
+        sampling: selection.rasterSampling,
+      );
       _clipboardVector = null;
     } else {
-      _clipboardImage =
-          await _rasterizeVectorSelectionToImage(selection, _canvasSize);
-      _clipboardImageSampling = _rasterImageSampling;
+      _setClipboardImage(
+        await _rasterizeVectorSelectionToImage(selection, _canvasSize),
+        sampling: _rasterImageSampling,
+      );
       _clipboardVector = null;
     }
 
@@ -2681,6 +3061,7 @@ class DrawingProvider extends ChangeNotifier {
     );
     _clearLayerLines(selection.layer);
     _resetSelectionState();
+    _registerCommittedOperation();
     notifyListeners();
   }
 
@@ -2689,11 +3070,13 @@ class DrawingProvider extends ChangeNotifier {
       _saveState();
       final LassoSelection s = _selection!;
       if (s.rasterImage != null) {
-        _clipboardImage = s.rasterImage;
-        _clipboardImageSampling = s.rasterSampling;
+        _setClipboardImage(
+          s.rasterImage,
+          sampling: s.rasterSampling,
+        );
         _clipboardVector = null;
       } else {
-        _clipboardImage = null;
+        _setClipboardImage(null);
         _clipboardVector = _ClipboardVectorSpec(
           maskPathSource: s.maskPath,
           boundsAtCopy: Rect.fromLTWH(
@@ -2841,10 +3224,14 @@ class DrawingProvider extends ChangeNotifier {
             color: color,
           );
     final ui.Image renderedText = await renderFuture;
-    return _padImageWithTransparentMargin(
+    final ui.Image padded = await _padImageWithTransparentMargin(
       renderedText,
       paddingPx: paddingPx,
     );
+    if (!identical(padded, renderedText)) {
+      renderedText.dispose();
+    }
+    return padded;
   }
 
   Future<ui.Image> _buildHorizontalTextImage({
@@ -3376,6 +3763,7 @@ class DrawingProvider extends ChangeNotifier {
     );
     _resetSelectionState();
     _markLayerContentChanged();
+    _registerCommittedOperation();
     notifyListeners();
   }
 

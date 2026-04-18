@@ -93,51 +93,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
                   onPanUpdate: (details) => _handlePanUpdate(details, drawing),
                   onPanEnd: (_) => _handlePanEnd(drawing),
                   onPanCancel: () => _handlePanEnd(drawing),
-                  child: CustomPaint(
-                    painter: DrawingPainter(
-                      allLines: drawing.lines,
-                      isLayerAVisible: drawing.isLayerAVisible,
-                      isLayerBVisible: drawing.isLayerBVisible,
-                      isLayerCVisible: drawing.isLayerCVisible,
-                      layerAOpacity: drawing.layerAOpacity,
-                      layerBOpacity: drawing.layerBOpacity,
-                      layerCOpacity: drawing.layerCOpacity,
-                      layerABaseImage: drawing.layerABaseImage,
-                      layerBBaseImage: drawing.layerBBaseImage,
-                      layerCBaseImage: drawing.layerCBaseImage,
-                      layerABaseSampling: drawing.layerABaseSampling,
-                      layerBBaseSampling: drawing.layerBBaseSampling,
-                      layerCBaseSampling: drawing.layerCBaseSampling,
-                      tone30Shader: drawing.tone30Shader,
-                      tone60Shader: drawing.tone60Shader,
-                      tone80Shader: drawing.tone80Shader,
-                      placements: drawing.placements,
-                      selection: drawing.selection,
-                      selectionMasksSource: drawing.selectionMasksSource,
-                      selectionHandlesFilled: drawing.selectionHandlesFilled,
-                      lassoDraft: drawing.lassoDraft,
-                      isDrawingLasso: drawing.isDrawingLasso,
-                      handles: drawing.getSelectionHandles(),
-                      currentTool: drawing.currentTool,
-                      currentStrokeWidth: drawing.strokeWidth,
-                      shapeStart: drawing.shapeStart,
-                      shapeEnd: drawing.shapeEnd,
-                      linesStartPointRatioA: drawing.linesStartPointRatioA,
-                      linesStartPointRatioB: drawing.linesStartPointRatioB,
-                      radialPreviewCenter: drawing.radialPreviewCenter,
-                      radialPreviewStartAngle: drawing.radialPreviewStartAngle,
-                      radialPreviewSweepAngle: drawing.radialPreviewSweepAngle,
-                      radialPreviewRadius: drawing.radialPreviewRadius,
-                      radialLineCountA: drawing.radialLineCountA,
-                      radialLineCountB: drawing.radialLineCountB,
-                      radialOffsetAngleA: drawing.radialOffsetAngleA,
-                      radialOffsetAngleB: drawing.radialOffsetAngleB,
-                      canvasRevision: drawing.canvasRevision,
-                      layerContentRevision: drawing.layerContentRevision,
-                      canvasSize: logicalSize,
-                      canvasVisualOffset: widget.canvasVisualOffset,
-                    ),
-                    child: Container(),
+                  child: _CanvasPaintStack(
+                    drawing: drawing,
+                    logicalSize: logicalSize,
+                    canvasVisualOffset: widget.canvasVisualOffset,
                   ),
                 ),
               ),
@@ -1147,6 +1106,157 @@ class SelectionDragState {
   });
 }
 
+class _CanvasPaintStack extends StatelessWidget {
+  final DrawingProvider drawing;
+  final Size logicalSize;
+  final Offset canvasVisualOffset;
+
+  const _CanvasPaintStack({
+    required this.drawing,
+    required this.logicalSize,
+    required this.canvasVisualOffset,
+  });
+
+  bool get _canUseSplitRendering {
+    if (drawing.selection != null || drawing.placements.isNotEmpty) {
+      return false;
+    }
+    for (final DrawnLine line in drawing.lines) {
+      if (line.isEraser) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_canUseSplitRendering) {
+      return SizedBox.expand(
+        child: CustomPaint(
+          painter: DrawingPainter(
+            allLines: drawing.lines,
+            isLayerAVisible: drawing.isLayerAVisible,
+            isLayerBVisible: drawing.isLayerBVisible,
+            isLayerCVisible: drawing.isLayerCVisible,
+            layerAOpacity: drawing.layerAOpacity,
+            layerBOpacity: drawing.layerBOpacity,
+            layerCOpacity: drawing.layerCOpacity,
+            layerABaseImage: drawing.layerABaseImage,
+            layerBBaseImage: drawing.layerBBaseImage,
+            layerCBaseImage: drawing.layerCBaseImage,
+            layerABaseSampling: drawing.layerABaseSampling,
+            layerBBaseSampling: drawing.layerBBaseSampling,
+            layerCBaseSampling: drawing.layerCBaseSampling,
+            tone30Shader: drawing.tone30Shader,
+            tone60Shader: drawing.tone60Shader,
+            tone80Shader: drawing.tone80Shader,
+            placements: drawing.placements,
+            selection: drawing.selection,
+            selectionMasksSource: drawing.selectionMasksSource,
+            selectionHandlesFilled: drawing.selectionHandlesFilled,
+            lassoDraft: drawing.lassoDraft,
+            isDrawingLasso: drawing.isDrawingLasso,
+            handles: drawing.getSelectionHandles(),
+            currentTool: drawing.currentTool,
+            currentStrokeWidth: drawing.strokeWidth,
+            shapeStart: drawing.shapeStart,
+            shapeEnd: drawing.shapeEnd,
+            linesStartPointRatioA: drawing.linesStartPointRatioA,
+            linesStartPointRatioB: drawing.linesStartPointRatioB,
+            radialPreviewCenter: drawing.radialPreviewCenter,
+            radialPreviewStartAngle: drawing.radialPreviewStartAngle,
+            radialPreviewSweepAngle: drawing.radialPreviewSweepAngle,
+            radialPreviewRadius: drawing.radialPreviewRadius,
+            radialLineCountA: drawing.radialLineCountA,
+            radialLineCountB: drawing.radialLineCountB,
+            radialOffsetAngleA: drawing.radialOffsetAngleA,
+            radialOffsetAngleB: drawing.radialOffsetAngleB,
+            canvasRevision: drawing.canvasRevision,
+            layerContentRevision: drawing.layerContentRevision,
+            canvasSize: logicalSize,
+            canvasVisualOffset: canvasVisualOffset,
+          ),
+        ),
+      );
+    }
+
+    return SizedBox.expand(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          RepaintBoundary(
+            child: CustomPaint(
+              painter: StaticLayerPainter(
+                isLayerAVisible: drawing.isLayerAVisible,
+                isLayerBVisible: drawing.isLayerBVisible,
+                isLayerCVisible: drawing.isLayerCVisible,
+                layerAOpacity: drawing.layerAOpacity,
+                layerBOpacity: drawing.layerBOpacity,
+                layerCOpacity: drawing.layerCOpacity,
+                layerABaseImage: drawing.layerABaseImage,
+                layerBBaseImage: drawing.layerBBaseImage,
+                layerCBaseImage: drawing.layerCBaseImage,
+                layerABaseSampling: drawing.layerABaseSampling,
+                layerBBaseSampling: drawing.layerBBaseSampling,
+                layerCBaseSampling: drawing.layerCBaseSampling,
+                canvasSize: logicalSize,
+                canvasVisualOffset: canvasVisualOffset,
+              ),
+            ),
+          ),
+          RepaintBoundary(
+            child: CustomPaint(
+              painter: DynamicLayerPainter(
+                allLines: drawing.lines,
+                isLayerAVisible: drawing.isLayerAVisible,
+                isLayerBVisible: drawing.isLayerBVisible,
+                isLayerCVisible: drawing.isLayerCVisible,
+                layerAOpacity: drawing.layerAOpacity,
+                layerBOpacity: drawing.layerBOpacity,
+                layerCOpacity: drawing.layerCOpacity,
+                tone30Shader: drawing.tone30Shader,
+                tone60Shader: drawing.tone60Shader,
+                tone80Shader: drawing.tone80Shader,
+                canvasRevision: drawing.canvasRevision,
+                canvasSize: logicalSize,
+                canvasVisualOffset: canvasVisualOffset,
+              ),
+            ),
+          ),
+          IgnorePointer(
+            child: RepaintBoundary(
+              child: CustomPaint(
+                painter: CanvasOverlayPainter(
+                  lassoDraft: drawing.lassoDraft,
+                  isDrawingLasso: drawing.isDrawingLasso,
+                  currentTool: drawing.currentTool,
+                  currentStrokeWidth: drawing.strokeWidth,
+                  shapeStart: drawing.shapeStart,
+                  shapeEnd: drawing.shapeEnd,
+                  linesStartPointRatioA: drawing.linesStartPointRatioA,
+                  linesStartPointRatioB: drawing.linesStartPointRatioB,
+                  radialPreviewCenter: drawing.radialPreviewCenter,
+                  radialPreviewStartAngle: drawing.radialPreviewStartAngle,
+                  radialPreviewSweepAngle: drawing.radialPreviewSweepAngle,
+                  radialPreviewRadius: drawing.radialPreviewRadius,
+                  radialLineCountA: drawing.radialLineCountA,
+                  radialLineCountB: drawing.radialLineCountB,
+                  radialOffsetAngleA: drawing.radialOffsetAngleA,
+                  radialOffsetAngleB: drawing.radialOffsetAngleB,
+                  canvasRevision: drawing.canvasRevision,
+                  canvasSize: logicalSize,
+                  canvasVisualOffset: canvasVisualOffset,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _RadialPreviewSegment {
   final Offset start;
   final Offset end;
@@ -1157,6 +1267,520 @@ class _RadialPreviewSegment {
     required this.end,
     required this.groupIndex,
   });
+}
+
+class StaticLayerPainter extends CustomPainter {
+  final bool isLayerAVisible;
+  final bool isLayerBVisible;
+  final bool isLayerCVisible;
+  final double layerAOpacity;
+  final double layerBOpacity;
+  final double layerCOpacity;
+  final ui.Image? layerABaseImage;
+  final ui.Image? layerBBaseImage;
+  final ui.Image? layerCBaseImage;
+  final RasterSamplingMode layerABaseSampling;
+  final RasterSamplingMode layerBBaseSampling;
+  final RasterSamplingMode layerCBaseSampling;
+  final Size canvasSize;
+  final Offset canvasVisualOffset;
+
+  StaticLayerPainter({
+    required this.isLayerAVisible,
+    required this.isLayerBVisible,
+    required this.isLayerCVisible,
+    required this.layerAOpacity,
+    required this.layerBOpacity,
+    required this.layerCOpacity,
+    required this.layerABaseImage,
+    required this.layerBBaseImage,
+    required this.layerCBaseImage,
+    required this.layerABaseSampling,
+    required this.layerBBaseSampling,
+    required this.layerCBaseSampling,
+    required this.canvasSize,
+    required this.canvasVisualOffset,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.translate(canvasVisualOffset.dx, canvasVisualOffset.dy);
+    _paintLayer(
+      canvas,
+      layerABaseImage,
+      isVisible: isLayerAVisible,
+      opacity: layerAOpacity,
+      sampling: layerABaseSampling,
+    );
+    _paintLayer(
+      canvas,
+      layerBBaseImage,
+      isVisible: isLayerBVisible,
+      opacity: layerBOpacity,
+      sampling: layerBBaseSampling,
+    );
+    _paintLayer(
+      canvas,
+      layerCBaseImage,
+      isVisible: isLayerCVisible,
+      opacity: layerCOpacity,
+      sampling: layerCBaseSampling,
+    );
+    canvas.restore();
+  }
+
+  void _paintLayer(
+    Canvas canvas,
+    ui.Image? image, {
+    required bool isVisible,
+    required double opacity,
+    required RasterSamplingMode sampling,
+  }) {
+    if (!isVisible || opacity <= 0.0 || image == null) {
+      return;
+    }
+    if (opacity < 1.0) {
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
+        Paint()..color = Colors.white.withValues(alpha: opacity),
+      );
+    }
+    final Paint paint = Paint()
+      ..isAntiAlias = sampling == RasterSamplingMode.smooth
+      ..filterQuality = sampling == RasterSamplingMode.smooth
+          ? FilterQuality.high
+          : FilterQuality.none;
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(
+        0,
+        0,
+        image.width.toDouble(),
+        image.height.toDouble(),
+      ),
+      Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
+      paint,
+    );
+    if (opacity < 1.0) {
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant StaticLayerPainter oldDelegate) {
+    return isLayerAVisible != oldDelegate.isLayerAVisible ||
+        isLayerBVisible != oldDelegate.isLayerBVisible ||
+        isLayerCVisible != oldDelegate.isLayerCVisible ||
+        layerAOpacity != oldDelegate.layerAOpacity ||
+        layerBOpacity != oldDelegate.layerBOpacity ||
+        layerCOpacity != oldDelegate.layerCOpacity ||
+        layerABaseImage != oldDelegate.layerABaseImage ||
+        layerBBaseImage != oldDelegate.layerBBaseImage ||
+        layerCBaseImage != oldDelegate.layerCBaseImage ||
+        layerABaseSampling != oldDelegate.layerABaseSampling ||
+        layerBBaseSampling != oldDelegate.layerBBaseSampling ||
+        layerCBaseSampling != oldDelegate.layerCBaseSampling ||
+        canvasSize != oldDelegate.canvasSize ||
+        canvasVisualOffset != oldDelegate.canvasVisualOffset;
+  }
+}
+
+class DynamicLayerPainter extends CustomPainter {
+  final List<DrawnLine> allLines;
+  final bool isLayerAVisible;
+  final bool isLayerBVisible;
+  final bool isLayerCVisible;
+  final double layerAOpacity;
+  final double layerBOpacity;
+  final double layerCOpacity;
+  final ui.ImageShader? tone30Shader;
+  final ui.ImageShader? tone60Shader;
+  final ui.ImageShader? tone80Shader;
+  final int canvasRevision;
+  final Size canvasSize;
+  final Offset canvasVisualOffset;
+
+  DynamicLayerPainter({
+    required this.allLines,
+    required this.isLayerAVisible,
+    required this.isLayerBVisible,
+    required this.isLayerCVisible,
+    required this.layerAOpacity,
+    required this.layerBOpacity,
+    required this.layerCOpacity,
+    required this.tone30Shader,
+    required this.tone60Shader,
+    required this.tone80Shader,
+    required this.canvasRevision,
+    required this.canvasSize,
+    required this.canvasVisualOffset,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.translate(canvasVisualOffset.dx, canvasVisualOffset.dy);
+    _drawLayer(
+      canvas,
+      DrawingLayer.layerA,
+      isVisible: isLayerAVisible,
+      opacity: layerAOpacity,
+    );
+    _drawLayer(
+      canvas,
+      DrawingLayer.layerB,
+      isVisible: isLayerBVisible,
+      opacity: layerBOpacity,
+    );
+    _drawLayer(
+      canvas,
+      DrawingLayer.layerC,
+      isVisible: isLayerCVisible,
+      opacity: layerCOpacity,
+    );
+    canvas.restore();
+  }
+
+  void _drawLayer(
+    Canvas canvas,
+    DrawingLayer layer, {
+    required bool isVisible,
+    required double opacity,
+  }) {
+    if (!isVisible || opacity <= 0.0) {
+      return;
+    }
+    if (opacity < 1.0) {
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
+        Paint()..color = Colors.white.withValues(alpha: opacity),
+      );
+    }
+    LayerCompositePainter.paintSourceContentsUpTo(
+      canvas,
+      layer,
+      kLayerCompositeMaxSequence,
+      canvasSize: canvasSize,
+      allLines: allLines,
+      allPlacements: const <LayerPlacement>[],
+      layerABaseImage: null,
+      layerBBaseImage: null,
+      layerCBaseImage: null,
+      layerABaseSampling: RasterSamplingMode.pixelated,
+      layerBBaseSampling: RasterSamplingMode.pixelated,
+      layerCBaseSampling: RasterSamplingMode.pixelated,
+      tone30Shader: tone30Shader,
+      tone60Shader: tone60Shader,
+      tone80Shader: tone80Shader,
+      cacheRevision: canvasRevision,
+    );
+    if (opacity < 1.0) {
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant DynamicLayerPainter oldDelegate) {
+    return canvasRevision != oldDelegate.canvasRevision ||
+        canvasSize != oldDelegate.canvasSize ||
+        canvasVisualOffset != oldDelegate.canvasVisualOffset;
+  }
+}
+
+class CanvasOverlayPainter extends CustomPainter {
+  final List<Offset> lassoDraft;
+  final bool isDrawingLasso;
+  final ToolType currentTool;
+  final double currentStrokeWidth;
+  final Offset? shapeStart;
+  final Offset? shapeEnd;
+  final double linesStartPointRatioA;
+  final double linesStartPointRatioB;
+  final Offset? radialPreviewCenter;
+  final double? radialPreviewStartAngle;
+  final double radialPreviewSweepAngle;
+  final double radialPreviewRadius;
+  final int radialLineCountA;
+  final int radialLineCountB;
+  final double radialOffsetAngleA;
+  final double radialOffsetAngleB;
+  final int canvasRevision;
+  final Size canvasSize;
+  final Offset canvasVisualOffset;
+
+  CanvasOverlayPainter({
+    required this.lassoDraft,
+    required this.isDrawingLasso,
+    required this.currentTool,
+    required this.currentStrokeWidth,
+    required this.shapeStart,
+    required this.shapeEnd,
+    required this.linesStartPointRatioA,
+    required this.linesStartPointRatioB,
+    required this.radialPreviewCenter,
+    required this.radialPreviewStartAngle,
+    required this.radialPreviewSweepAngle,
+    required this.radialPreviewRadius,
+    required this.radialLineCountA,
+    required this.radialLineCountB,
+    required this.radialOffsetAngleA,
+    required this.radialOffsetAngleB,
+    required this.canvasRevision,
+    required this.canvasSize,
+    required this.canvasVisualOffset,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.translate(canvasVisualOffset.dx, canvasVisualOffset.dy);
+    if (isDrawingLasso && lassoDraft.length > 1) {
+      _drawLassoDraft(canvas);
+    }
+    if (_isShapeTool(currentTool) && shapeStart != null && shapeEnd != null) {
+      _drawShapeGuide(canvas, currentTool, shapeStart!, shapeEnd!);
+    }
+    if (currentTool == ToolType.radial && radialPreviewCenter != null) {
+      _drawRadialPreview(canvas);
+    }
+    canvas.restore();
+  }
+
+  void _drawLassoDraft(Canvas canvas) {
+    final paint = Paint()
+      ..color = Colors.blueGrey
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    final path = Path()..addPolygon(lassoDraft, false);
+    canvas.drawPath(path, paint);
+  }
+
+  bool _isShapeTool(ToolType tool) {
+    return tool == ToolType.rect ||
+        tool == ToolType.fillRect ||
+        tool == ToolType.circle ||
+        tool == ToolType.fillCircle ||
+        tool == ToolType.line;
+  }
+
+  void _drawShapeGuide(Canvas canvas, ToolType tool, Offset start, Offset end) {
+    final rect = Rect.fromPoints(start, end);
+    final path = Path();
+    switch (tool) {
+      case ToolType.rect:
+      case ToolType.fillRect:
+        path.addRect(rect);
+        break;
+      case ToolType.circle:
+      case ToolType.fillCircle:
+        path.addOval(rect);
+        break;
+      case ToolType.line:
+        path
+          ..moveTo(start.dx, start.dy)
+          ..lineTo(end.dx, end.dy);
+        break;
+      default:
+        return;
+    }
+    final paint = Paint()
+      ..color = Colors.grey.shade700
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    _drawDashedPath(canvas, path, paint);
+  }
+
+  void _drawRadialPreview(Canvas canvas) {
+    final Offset center = radialPreviewCenter!;
+    final Paint crossPaint = Paint()
+      ..color = const Color(0xFFFF4DB8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6;
+    canvas.drawLine(
+      center + const Offset(-8, -8),
+      center + const Offset(8, 8),
+      crossPaint,
+    );
+    canvas.drawLine(
+      center + const Offset(-8, 8),
+      center + const Offset(8, -8),
+      crossPaint,
+    );
+
+    if (radialPreviewRadius <= 0.0) {
+      return;
+    }
+
+    final Path radiusPath = Path()
+      ..addOval(
+        Rect.fromCircle(center: center, radius: radialPreviewRadius),
+      );
+    final Paint radiusPaint = Paint()
+      ..color = const Color(0x66FF4DB8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    _drawDashedPath(
+      canvas,
+      radiusPath,
+      radiusPaint,
+      dashLength: 7,
+      gapLength: 5,
+    );
+
+    for (final _RadialPreviewSegment segment in _buildRadialPreviewSegments()) {
+      canvas.drawLine(
+        segment.start,
+        segment.end,
+        Paint()
+          ..color = switch (segment.groupIndex) {
+            0 => const Color(0xC0686830),
+            _ => const Color(0xA8686830),
+          }
+          ..strokeWidth = currentStrokeWidth.clamp(1.0, 30.0),
+      );
+    }
+  }
+
+  List<_RadialPreviewSegment> _buildRadialPreviewSegments() {
+    final Offset? center = radialPreviewCenter;
+    final double? startAngle = radialPreviewStartAngle;
+    if (center == null ||
+        startAngle == null ||
+        radialPreviewRadius <= 0.0 ||
+        radialPreviewSweepAngle <= 0.0) {
+      return const <_RadialPreviewSegment>[];
+    }
+
+    final List<_RadialPreviewSegment> segments = <_RadialPreviewSegment>[];
+    segments.addAll(
+      _buildRadialPreviewSegmentsForGroup(
+        center: center,
+        startAngle: startAngle,
+        lineCount: radialLineCountA,
+        visibleLengthRatio: linesStartPointRatioA,
+        offsetAngle: radialOffsetAngleA,
+        groupIndex: 0,
+        shiftHalfStep: false,
+      ),
+    );
+    segments.addAll(
+      _buildRadialPreviewSegmentsForGroup(
+        center: center,
+        startAngle: startAngle,
+        lineCount: radialLineCountB,
+        visibleLengthRatio: linesStartPointRatioB,
+        offsetAngle: radialOffsetAngleB,
+        groupIndex: 1,
+        shiftHalfStep: true,
+      ),
+    );
+    return segments;
+  }
+
+  List<_RadialPreviewSegment> _buildRadialPreviewSegmentsForGroup({
+    required Offset center,
+    required double startAngle,
+    required int lineCount,
+    required double visibleLengthRatio,
+    required double offsetAngle,
+    required int groupIndex,
+    required bool shiftHalfStep,
+  }) {
+    if (lineCount <= 0) {
+      return const <_RadialPreviewSegment>[];
+    }
+
+    final List<_RadialPreviewSegment> segments = <_RadialPreviewSegment>[];
+    final double step = radialPreviewSweepAngle / lineCount;
+    final double basePhase = shiftHalfStep ? step / 2.0 : 0.0;
+    final double startRadius =
+        radialPreviewRadius * (1.0 - visibleLengthRatio.clamp(0.0, 1.0));
+    for (int index = 0; index < lineCount; index++) {
+      final double angle =
+          startAngle + basePhase + (step * index) + offsetAngle;
+      final Offset end = _clampRayToCanvas(
+        center,
+        _pointAlongAngle(center, angle, radialPreviewRadius),
+      );
+      final double effectiveRadius = (end - center).distance;
+      if (effectiveRadius <= 0.0) {
+        continue;
+      }
+      final double clampedStartRadius =
+          startRadius.clamp(0.0, effectiveRadius).toDouble();
+      segments.add(
+        _RadialPreviewSegment(
+          start: _pointAlongAngle(center, angle, clampedStartRadius),
+          end: end,
+          groupIndex: groupIndex,
+        ),
+      );
+    }
+    return segments;
+  }
+
+  Offset _pointAlongAngle(Offset center, double angle, double radius) {
+    return Offset(
+      center.dx + math.cos(angle) * radius,
+      center.dy + math.sin(angle) * radius,
+    );
+  }
+
+  Offset _clampRayToCanvas(Offset inside, Offset candidate) {
+    final bool isInsideCanvasBounds = candidate.dx >= 0.0 &&
+        candidate.dy >= 0.0 &&
+        candidate.dx <= canvasSize.width &&
+        candidate.dy <= canvasSize.height;
+    if (isInsideCanvasBounds) {
+      return candidate;
+    }
+
+    final double dx = candidate.dx - inside.dx;
+    final double dy = candidate.dy - inside.dy;
+    if (dx == 0.0 && dy == 0.0) {
+      return inside;
+    }
+
+    double t = 1.0;
+    if (dx > 0.0) {
+      t = math.min(t, (canvasSize.width - inside.dx) / dx);
+    } else if (dx < 0.0) {
+      t = math.min(t, (0.0 - inside.dx) / dx);
+    }
+    if (dy > 0.0) {
+      t = math.min(t, (canvasSize.height - inside.dy) / dy);
+    } else if (dy < 0.0) {
+      t = math.min(t, (0.0 - inside.dy) / dy);
+    }
+
+    return Offset(
+      inside.dx + dx * t,
+      inside.dy + dy * t,
+    );
+  }
+
+  void _drawDashedPath(Canvas canvas, Path path, Paint paint,
+      {double dashLength = 8, double gapLength = 6}) {
+    for (final metric in path.computeMetrics()) {
+      double distance = 0;
+      final double length = metric.length;
+      while (distance < length) {
+        final double next = distance + dashLength;
+        final Path segment =
+            metric.extractPath(distance, next.clamp(0, length));
+        canvas.drawPath(segment, paint);
+        distance += dashLength + gapLength;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CanvasOverlayPainter oldDelegate) {
+    return canvasRevision != oldDelegate.canvasRevision ||
+        canvasSize != oldDelegate.canvasSize ||
+        canvasVisualOffset != oldDelegate.canvasVisualOffset;
+  }
 }
 
 class DrawingPainter extends CustomPainter {

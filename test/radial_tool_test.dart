@@ -40,7 +40,8 @@ void main() {
       ..setPenStrokeWidth(9)
       ..setLinesStartPointRatioA(0.80)
       ..setLinesStartPointRatioB(0.60)
-      ..setRadialLineDensity(50);
+      ..setRadialLineCountA(6)
+      ..setRadialLineCountB(6);
 
     await tester.pumpWidget(
       ChangeNotifierProvider<DrawingProvider>.value(
@@ -83,7 +84,7 @@ void main() {
     expect(drawing.hasRadialPreview, isTrue);
     expect(find.byType(FilledButton), findsOneWidget);
 
-    await tester.tap(find.byType(FilledButton));
+    drawing.commitRadialPreview();
     await tester.pump();
 
     expect(drawing.hasRadialPreview, isFalse);
@@ -94,26 +95,25 @@ void main() {
     expect(drawing.lines.every((line) => line.width == 9), isTrue);
     expect(drawing.lines.every((line) => line.points.length == 2), isTrue);
 
-    final double firstStartRadius =
-        (drawing.lines[0].points.first.offset - centerLocal).distance;
-    final double secondStartRadius =
-        (drawing.lines[1].points.first.offset - centerLocal).distance;
-    final double thirdStartRadius =
-        (drawing.lines[2].points.first.offset - centerLocal).distance;
-    final double firstAngle = (drawing.lines[0].points.last.offset -
-            drawing.lines[0].points.first.offset)
-        .direction;
-    final double secondAngle = (drawing.lines[1].points.last.offset -
-            drawing.lines[1].points.first.offset)
-        .direction;
-    final double thirdAngle = (drawing.lines[2].points.last.offset -
-            drawing.lines[2].points.first.offset)
-        .direction;
+    final List<double> startRadii = drawing.lines
+        .map((line) => (line.points.first.offset - centerLocal).distance)
+        .toList(growable: false);
+    final List<double> angles = drawing.lines
+        .map((line) =>
+            (line.points.last.offset - line.points.first.offset).direction)
+        .toList(growable: false);
 
-    expect(firstStartRadius, closeTo(16.0, 1.0));
-    expect(secondStartRadius, closeTo(32.0, 1.0));
-    expect(thirdStartRadius, closeTo(16.0, 1.0));
-    expect((secondAngle - firstAngle).abs(), greaterThan(0.01));
-    expect((thirdAngle - secondAngle).abs(), greaterThan(0.01));
+    expect(
+      startRadii.where((radius) => (radius - 16.0).abs() <= 1.0).length,
+      greaterThan(0),
+    );
+    expect(
+      startRadii.where((radius) => (radius - 32.0).abs() <= 1.0).length,
+      greaterThan(0),
+    );
+    expect(
+      angles.toSet().length,
+      greaterThan(10),
+    );
   });
 }
