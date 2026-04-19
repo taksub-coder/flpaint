@@ -10,6 +10,7 @@ plugins {
 
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
+val legacyAndroidMinSdk = 21
 if (keystorePropertiesFile.exists()) {
     FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
 }
@@ -41,9 +42,9 @@ android {
 
     defaultConfig {
         applicationId = "com.kaihatsud2.flpaint"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // Keep Android 5.0+ installable even when newer Flutter defaults raise
+        // the platform floor.
+        minSdk = legacyAndroidMinSdk
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
