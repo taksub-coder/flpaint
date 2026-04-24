@@ -1,4 +1,4 @@
-//flpaint_プロトタイプ2.1C
+//Flaint_プロトタイプ2.1d
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/drawing.dart';
 import '../painting/layer_composite_painter.dart';
+import '../painting/pixel_geometry.dart';
 
 class _DrawingSnapshot {
   final List<DrawnLine> lines;
@@ -213,6 +214,7 @@ class DrawingProvider extends ChangeNotifier {
   bool _backupInitializationStarted = false;
   bool _toneShadersInitializing = false;
   bool _toneShadersReady = false;
+  Future<void>? _toneShaderInitializationFuture;
 
   List<DrawnLine> get lines => _lines;
   List<DrawnLine> get layerALines => List<DrawnLine>.unmodifiable(
@@ -316,6 +318,8 @@ class DrawingProvider extends ChangeNotifier {
   static const Duration _autosaveRetryDelay = Duration(seconds: 30);
   static const RasterSamplingMode _rasterImageSampling =
       RasterSamplingMode.smooth;
+  static const RasterSamplingMode _bakedLayerSampling =
+      RasterSamplingMode.pixelated;
   static const int _autoBakeLineThreshold = 20;
   static const int _androidMaxUndoSnapshots = 5;
   static const int _defaultMaxUndoSnapshots = 100;
@@ -597,6 +601,10 @@ class DrawingProvider extends ChangeNotifier {
     unawaited(_initializeBackupSystemIfNeeded());
   }
 
+  Future<void> ensureToneShadersReady() {
+    return _ensureToneShadersInitialized();
+  }
+
   Future<void> _initializeBackupSystemIfNeeded() async {
     if (_backupInitializationStarted) return;
     _backupInitializationStarted = true;
@@ -738,17 +746,17 @@ class DrawingProvider extends ChangeNotifier {
     _setLayerBaseImage(
       DrawingLayer.layerA,
       bakedLayers[0],
-      sampling: _rasterImageSampling,
+      sampling: _bakedLayerSampling,
     );
     _setLayerBaseImage(
       DrawingLayer.layerB,
       bakedLayers[1],
-      sampling: _rasterImageSampling,
+      sampling: _bakedLayerSampling,
     );
     _setLayerBaseImage(
       DrawingLayer.layerC,
       bakedLayers[2],
-      sampling: _rasterImageSampling,
+      sampling: _bakedLayerSampling,
     );
     _lines.clear();
     _placements.clear();
@@ -803,14 +811,24 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   Future<void> _ensureToneShadersInitialized() async {
-    if (_toneShadersReady || _toneShadersInitializing) {
+    if (_toneShadersReady) {
+      return;
+    }
+    final Future<void>? pendingInitialization = _toneShaderInitializationFuture;
+    if (pendingInitialization != null) {
+      await pendingInitialization;
       return;
     }
     _toneShadersInitializing = true;
-    try {
+    final Future<void> initialization = (() async {
       await _initializeToneShaders();
       _toneShadersReady = true;
+    })();
+    _toneShaderInitializationFuture = initialization;
+    try {
+      await initialization;
     } finally {
+      _toneShaderInitializationFuture = null;
       _toneShadersInitializing = false;
     }
   }
@@ -893,8 +911,8 @@ class DrawingProvider extends ChangeNotifier {
       Rect.fromLTWH(0, 0, sourceSize.toDouble(), sourceSize.toDouble()),
       Rect.fromLTWH(0, 0, _toneTileSize.toDouble(), _toneTileSize.toDouble()),
       Paint()
-        ..isAntiAlias = true
-        ..filterQuality = FilterQuality.high,
+        ..isAntiAlias = false
+        ..filterQuality = FilterQuality.none,
     );
     final downsamplePicture = downsampleRecorder.endRecording();
     final ui.Image downsampled =
@@ -1392,7 +1410,7 @@ class DrawingProvider extends ChangeNotifier {
     _setLayerBaseImage(
       _activeLayer,
       merged,
-      sampling: _rasterImageSampling,
+      sampling: _bakedLayerSampling,
     );
     _setLayerOpacityValue(_activeLayer, 1.0);
     _setLayerVisibilityValue(_activeLayer, true);
@@ -1636,7 +1654,7 @@ class DrawingProvider extends ChangeNotifier {
       1.0,
       math.min(canvasSize.width / srcW, canvasSize.height / srcH),
     );
-    return Rect.fromLTWH(0, 0, srcW * scale, srcH * scale);
+    return pixelRectFromLTWH(0, 0, srcW * scale, srcH * scale);
   }
 
   bool _rectFillsCanvas(Rect rect, Size canvasSize) {
@@ -1674,16 +1692,15 @@ class DrawingProvider extends ChangeNotifier {
     Rect dstRect, {
     required RasterSamplingMode sampling,
   }) {
+    final Rect snappedDstRect = pixelRect(dstRect);
     final Paint paint = Paint()
-      ..isAntiAlias = sampling == RasterSamplingMode.smooth
-      ..filterQuality = sampling == RasterSamplingMode.smooth
-          ? FilterQuality.high
-          : FilterQuality.none;
+      ..isAntiAlias = false
+      ..filterQuality = FilterQuality.none;
     final bool keepsNativePixels =
-        (dstRect.width - image.width.toDouble()).abs() < 0.001 &&
-            (dstRect.height - image.height.toDouble()).abs() < 0.001;
+        snappedDstRect.width.round() == image.width &&
+            snappedDstRect.height.round() == image.height;
     if (keepsNativePixels) {
-      canvas.drawImage(image, dstRect.topLeft, paint);
+      canvas.drawImage(image, pixelOffset(snappedDstRect.topLeft), paint);
       return;
     }
 
@@ -1695,7 +1712,7 @@ class DrawingProvider extends ChangeNotifier {
         image.width.toDouble(),
         image.height.toDouble(),
       ),
-      dstRect,
+      snappedDstRect,
       paint,
     );
   }
@@ -1706,8 +1723,13 @@ class DrawingProvider extends ChangeNotifier {
     Rect dstRect,
     Size canvasSize,
   ) async {
+    final int outputWidth = pixelInt(canvasSize.width);
+    final int outputHeight = pixelInt(canvasSize.height);
+    final Size outputSize =
+        Size(outputWidth.toDouble(), outputHeight.toDouble());
     final Rect canvasRect =
-        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height);
+        Rect.fromLTWH(0, 0, outputSize.width, outputSize.height);
+    final Rect snappedDstRect = pixelRect(dstRect);
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
@@ -1717,27 +1739,7 @@ class DrawingProvider extends ChangeNotifier {
       DrawingLayer.layerB => _layerBBaseImage,
       DrawingLayer.layerC => _layerCBaseImage,
     };
-    final bool importFillsCanvas = _rectFillsCanvas(dstRect, canvasSize);
-    final bool keepNativeResolution = importFillsCanvas &&
-        (importImage.width != canvasSize.width.ceil() ||
-            importImage.height != canvasSize.height.ceil() ||
-            (layerBaseImage != null &&
-                (layerBaseImage.width != canvasSize.width.ceil() ||
-                    layerBaseImage.height != canvasSize.height.ceil())));
-    final int outputWidth = keepNativeResolution
-        ? math.max(canvasSize.width.ceil(),
-            math.max(importImage.width, layerBaseImage?.width ?? 0))
-        : canvasSize.width.ceil();
-    final int outputHeight = keepNativeResolution
-        ? math.max(
-            canvasSize.height.ceil(),
-            math.max(importImage.height, layerBaseImage?.height ?? 0),
-          )
-        : canvasSize.height.ceil();
-    canvas.scale(
-      outputWidth / canvasSize.width,
-      outputHeight / canvasSize.height,
-    );
+    final bool importFillsCanvas = _rectFillsCanvas(snappedDstRect, outputSize);
 
     if (layerBaseImage != null) {
       _drawRasterImageToRect(
@@ -1751,10 +1753,8 @@ class DrawingProvider extends ChangeNotifier {
     _drawRasterImageToRect(
       canvas,
       importImage,
-      dstRect,
-      sampling: importFillsCanvas
-          ? RasterSamplingMode.pixelated
-          : _rasterImageSampling,
+      snappedDstRect,
+      sampling: RasterSamplingMode.pixelated,
     );
 
     final picture = recorder.endRecording();
@@ -1774,18 +1774,18 @@ class DrawingProvider extends ChangeNotifier {
     Size outputSize, {
     Size logicalSize = _ioCanvasSize,
   }) async {
+    final int outputWidth = pixelInt(logicalSize.width);
+    final int outputHeight = pixelInt(logicalSize.height);
+    final Size pixelLogicalSize =
+        Size(outputWidth.toDouble(), outputHeight.toDouble());
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
-    canvas.scale(
-      outputSize.width / logicalSize.width,
-      outputSize.height / logicalSize.height,
-    );
 
     if (_isLayerAVisible && _layerAOpacity > 0) {
       _paintLayerCompositeForExport(
         canvas,
-        logicalSize,
+        pixelLogicalSize,
         DrawingLayer.layerA,
         _layerAOpacity,
       );
@@ -1793,7 +1793,7 @@ class DrawingProvider extends ChangeNotifier {
     if (_isLayerBVisible && _layerBOpacity > 0) {
       _paintLayerCompositeForExport(
         canvas,
-        logicalSize,
+        pixelLogicalSize,
         DrawingLayer.layerB,
         _layerBOpacity,
       );
@@ -1801,14 +1801,14 @@ class DrawingProvider extends ChangeNotifier {
     if (_isLayerCVisible && _layerCOpacity > 0) {
       _paintLayerCompositeForExport(
         canvas,
-        logicalSize,
+        pixelLogicalSize,
         DrawingLayer.layerC,
         _layerCOpacity,
       );
     }
 
     final picture = recorder.endRecording();
-    return picture.toImage(outputSize.width.ceil(), outputSize.height.ceil());
+    return picture.toImage(outputWidth, outputHeight);
   }
 
   void _paintLayerCompositeForExport(
@@ -2344,7 +2344,7 @@ class DrawingProvider extends ChangeNotifier {
   // ==========================================
   void optimizeMemoryForEmergency() {
     debugPrint(
-      '🚨 [flpaint_プロトタイプ2.1C] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
+      '🚨 [Flaint_プロトタイプ2.1d] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
     );
 
     _clearRedoStack();
@@ -2366,7 +2366,7 @@ class DrawingProvider extends ChangeNotifier {
     }
 
     debugPrint(
-      '✅ [flpaint_プロトタイプ2.1C] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
+      '✅ [Flaint_プロトタイプ2.1d] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
     );
     _notifyUiOnly();
   }
@@ -2394,12 +2394,13 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   Offset _smoothOffset(Offset rawPoint, {bool forceJitterLerp = false}) {
+    final Offset snappedRawPoint = pixelOffset(rawPoint);
     final lastStored = _currentLine!.points.last.offset;
-    final distanceToLast = (rawPoint - lastStored).distance;
+    final distanceToLast = (snappedRawPoint - lastStored).distance;
     final t = (forceJitterLerp || distanceToLast < _jitterDistanceThreshold)
         ? _jitterLerpFactor
         : _regularLerpFactor;
-    return Offset.lerp(lastStored, rawPoint, t)!;
+    return pixelOffset(Offset.lerp(lastStored, snappedRawPoint, t)!);
   }
 
   void _trimTailNoise() {
@@ -2539,7 +2540,7 @@ class DrawingProvider extends ChangeNotifier {
 
   DrawnLine _cloneLine(DrawnLine src) {
     return DrawnLine(
-      List<Point>.from(src.points),
+      pixelPointList(src.points),
       color: src.color,
       width: src.width,
       tool: src.tool,
@@ -2549,14 +2550,7 @@ class DrawingProvider extends ChangeNotifier {
       eraserAlpha: src.eraserAlpha,
       isFinished: src.isFinished,
       layer: src.layer,
-      shapeRect: src.shapeRect == null
-          ? null
-          : Rect.fromLTWH(
-              src.shapeRect!.left,
-              src.shapeRect!.top,
-              src.shapeRect!.width,
-              src.shapeRect!.height,
-            ),
+      shapeRect: src.shapeRect == null ? null : pixelRect(src.shapeRect!),
     );
   }
 
@@ -2575,15 +2569,10 @@ class DrawingProvider extends ChangeNotifier {
       sourceMaskPath: src.sourceMaskPath == null
           ? null
           : (Path()..addPath(src.sourceMaskPath!, Offset.zero)),
-      baseRect: Rect.fromLTWH(
-        src.baseRect.left,
-        src.baseRect.top,
-        src.baseRect.width,
-        src.baseRect.height,
-      ),
-      translation: src.translation,
-      scaleX: src.scaleX,
-      scaleY: src.scaleY,
+      baseRect: pixelRect(src.baseRect),
+      translation: pixelOffset(src.translation),
+      scaleX: 1,
+      scaleY: 1,
       rotation: src.rotation,
     );
   }
@@ -2597,15 +2586,10 @@ class DrawingProvider extends ChangeNotifier {
       maxContentSequence: src.maxContentSequence,
       maskPath: clonedPath,
       layer: src.layer,
-      baseRect: Rect.fromLTWH(
-        src.baseRect.left,
-        src.baseRect.top,
-        src.baseRect.width,
-        src.baseRect.height,
-      ),
-      translation: src.translation,
-      scaleX: src.scaleX,
-      scaleY: src.scaleY,
+      baseRect: pixelRect(src.baseRect),
+      translation: pixelOffset(src.translation),
+      scaleX: 1,
+      scaleY: 1,
       rotation: src.rotation,
     );
   }
@@ -2613,15 +2597,16 @@ class DrawingProvider extends ChangeNotifier {
   void startNewLine(Offset startPoint) {
     if (_tool == ToolType.lasso) return;
     _saveState();
+    final Offset snappedStartPoint = pixelOffset(startPoint);
 
     if (_isShapeTool(_tool)) {
-      _shapeStart = startPoint;
-      _shapeEnd = startPoint;
+      _shapeStart = snappedStartPoint;
+      _shapeEnd = snappedStartPoint;
       notifyListeners();
       return;
     }
 
-    _lineStartPoint = startPoint;
+    _lineStartPoint = snappedStartPoint;
     final bool isEraserStroke = _tool == ToolType.eraser;
     final double activeStrokeWidth =
         isEraserStroke ? _eraserWidth : _strokeWidth;
@@ -2640,7 +2625,7 @@ class DrawingProvider extends ChangeNotifier {
     _currentLine = DrawnLine(
       [
         Point(
-          startPoint,
+          snappedStartPoint,
           _tool == ToolType.pressure ? 0.01 : activeStrokeWidth,
         )
       ],
@@ -2664,8 +2649,9 @@ class DrawingProvider extends ChangeNotifier {
     Offset lastPoint, {
     bool preserveExactPoint = false,
   }) {
+    final Offset snappedPoint = pixelOffset(point);
     if (_isShapeTool(_tool)) {
-      _shapeEnd = point;
+      _shapeEnd = snappedPoint;
       notifyListeners();
       return;
     }
@@ -2674,13 +2660,13 @@ class DrawingProvider extends ChangeNotifier {
 
     final currentPoints = _currentLine!.points;
     final lastStored = currentPoints.last;
-    final distanceToLast = (point - lastStored.offset).distance;
+    final distanceToLast = (snappedPoint - lastStored.offset).distance;
 
     // ボコボコ防止（0.5px以下の微細な動きを無視）
     if (distanceToLast < 0.5) return;
 
     final Offset smoothedOffset =
-        preserveExactPoint ? point : _smoothOffset(point);
+        preserveExactPoint ? snappedPoint : _smoothOffset(snappedPoint);
 
     // 速度計算
     final now = DateTime.now();
@@ -2707,7 +2693,7 @@ class DrawingProvider extends ChangeNotifier {
       }
     }
 
-    currentPoints.add(Point(smoothedOffset, width));
+    currentPoints.add(Point(smoothedOffset, math.max(1, width.roundToDouble())));
     notifyListeners();
   }
 
@@ -2986,14 +2972,14 @@ class DrawingProvider extends ChangeNotifier {
   ) async {
     final DrawingLayer layer = selection.layer;
     final Path path = Path()..addPath(selection.maskPath, Offset.zero);
-    final Rect bounds = selection.baseRect;
+    final Rect bounds = pixelOuterRect(selection.baseRect);
     final int sampledWidth = math.max(
       1,
-      canvasSize.width.ceil(),
+      canvasSize.width.round(),
     );
     final int sampledHeight = math.max(
       1,
-      canvasSize.height.ceil(),
+      canvasSize.height.round(),
     );
 
     final recorder = ui.PictureRecorder();
@@ -3017,15 +3003,20 @@ class DrawingProvider extends ChangeNotifier {
     cropCanvas.drawImageRect(
       maskedLayer,
       bounds,
-      Rect.fromLTWH(0, 0, bounds.width, bounds.height),
+      Rect.fromLTWH(
+        0,
+        0,
+        bounds.width.roundToDouble(),
+        bounds.height.roundToDouble(),
+      ),
       Paint()
         ..isAntiAlias = false
         ..filterQuality = FilterQuality.none,
     );
     final cropPicture = cropRecorder.endRecording();
     final ui.Image cropped = await cropPicture.toImage(
-      math.max(1, bounds.width.ceil()),
-      math.max(1, bounds.height.ceil()),
+      pixelInt(bounds.width),
+      pixelInt(bounds.height),
     );
     maskedLayer.dispose();
     return cropped;
@@ -3044,7 +3035,7 @@ class DrawingProvider extends ChangeNotifier {
     } else {
       _setClipboardImage(
         await _rasterizeVectorSelectionToImage(selection, _canvasSize),
-        sampling: _rasterImageSampling,
+        sampling: _bakedLayerSampling,
       );
       _clipboardVector = null;
     }

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/drawing.dart';
 import '../painting/layer_composite_painter.dart';
+import '../painting/pixel_geometry.dart';
 import '../providers/drawing_provider.dart';
 
 class DrawingCanvas extends StatefulWidget {
@@ -317,9 +318,9 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
   Offset _toCanvasPosition(Offset globalPosition, {Offset? fallbackLocal}) {
     final mapper = widget.toCanvas;
     if (mapper != null) {
-      return mapper(globalPosition);
+      return pixelOffset(mapper(globalPosition));
     }
-    return fallbackLocal ?? globalPosition;
+    return pixelOffset(fallbackLocal ?? globalPosition);
   }
 
   // キャンバス端の描画を許可するため、微小な余裕（epsilon）を持たせる
@@ -375,19 +376,19 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
     if (!clipTest(dy, size.height - inside.dy)) return null;
 
     final double t = t1;
-    return Offset(
+    return pixelOffset(Offset(
       inside.dx + dx * t,
       inside.dy + dy * t,
-    );
+    ));
   }
 
   Offset _projectPointToCanvasBounds(Offset position) {
     final Size size = _canvasSize ?? widget.logicalCanvasSize ?? Size.zero;
     if (size == Size.zero) return position;
-    return Offset(
+    return pixelOffset(Offset(
       position.dx.clamp(0.0, size.width).toDouble(),
       position.dy.clamp(0.0, size.height).toDouble(),
-    );
+    ));
   }
 
   void _appendLassoPointIfNeeded(DrawingProvider drawing, Offset point) {
@@ -1121,6 +1122,11 @@ class _CanvasPaintStack extends StatelessWidget {
     if (drawing.selection != null || drawing.placements.isNotEmpty) {
       return false;
     }
+    if (drawing.layerABaseImage != null ||
+        drawing.layerBBaseImage != null ||
+        drawing.layerCBaseImage != null) {
+      return false;
+    }
     for (final DrawnLine line in drawing.lines) {
       if (line.isEraser) {
         return false;
@@ -1305,7 +1311,8 @@ class StaticLayerPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
-    canvas.translate(canvasVisualOffset.dx, canvasVisualOffset.dy);
+    final Offset snappedVisualOffset = pixelOffset(canvasVisualOffset);
+    canvas.translate(snappedVisualOffset.dx, snappedVisualOffset.dy);
     _paintLayer(
       canvas,
       layerABaseImage,
@@ -1342,26 +1349,33 @@ class StaticLayerPainter extends CustomPainter {
     }
     if (opacity < 1.0) {
       canvas.saveLayer(
-        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
+        pixelRectFromLTWH(0, 0, canvasSize.width, canvasSize.height),
         Paint()..color = Colors.white.withValues(alpha: opacity),
       );
     }
     final Paint paint = Paint()
-      ..isAntiAlias = sampling == RasterSamplingMode.smooth
-      ..filterQuality = sampling == RasterSamplingMode.smooth
-          ? FilterQuality.high
-          : FilterQuality.none;
-    canvas.drawImageRect(
-      image,
-      Rect.fromLTWH(
-        0,
-        0,
-        image.width.toDouble(),
-        image.height.toDouble(),
-      ),
-      Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
-      paint,
-    );
+      ..isAntiAlias = false
+      ..filterQuality = FilterQuality.none;
+    final Rect dstRect =
+        pixelRectFromLTWH(0, 0, canvasSize.width, canvasSize.height);
+    final bool keepsNativePixels =
+        dstRect.width.round() == image.width &&
+            dstRect.height.round() == image.height;
+    if (keepsNativePixels) {
+      canvas.drawImage(image, pixelOffset(dstRect.topLeft), paint);
+    } else {
+      canvas.drawImageRect(
+        image,
+        Rect.fromLTWH(
+          0,
+          0,
+          image.width.toDouble(),
+          image.height.toDouble(),
+        ),
+        dstRect,
+        paint,
+      );
+    }
     if (opacity < 1.0) {
       canvas.restore();
     }
@@ -1420,7 +1434,8 @@ class DynamicLayerPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
-    canvas.translate(canvasVisualOffset.dx, canvasVisualOffset.dy);
+    final Offset snappedVisualOffset = pixelOffset(canvasVisualOffset);
+    canvas.translate(snappedVisualOffset.dx, snappedVisualOffset.dy);
     _drawLayer(
       canvas,
       DrawingLayer.layerA,
@@ -1534,7 +1549,8 @@ class CanvasOverlayPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
-    canvas.translate(canvasVisualOffset.dx, canvasVisualOffset.dy);
+    final Offset snappedVisualOffset = pixelOffset(canvasVisualOffset);
+    canvas.translate(snappedVisualOffset.dx, snappedVisualOffset.dy);
     if (isDrawingLasso && lassoDraft.length > 1) {
       _drawLassoDraft(canvas);
     }
@@ -1876,7 +1892,8 @@ class DrawingPainter extends CustomPainter {
     // canvas.drawColor(Colors.white, BlendMode.srcOver);
 
     canvas.save();
-    canvas.translate(canvasVisualOffset.dx, canvasVisualOffset.dy);
+    final Offset snappedVisualOffset = pixelOffset(canvasVisualOffset);
+    canvas.translate(snappedVisualOffset.dx, snappedVisualOffset.dy);
     final Rect canvasBounds =
         Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height);
 

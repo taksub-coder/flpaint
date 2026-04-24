@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -9,6 +10,16 @@ import 'package:myapp/providers/drawing_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('ensureToneShadersReady initializes tone shaders before use', () async {
+    final DrawingProvider provider = DrawingProvider();
+
+    await provider.ensureToneShadersReady();
+
+    expect(provider.tone30Shader, isNotNull);
+    expect(provider.tone60Shader, isNotNull);
+    expect(provider.tone80Shader, isNotNull);
+  });
 
   test('restore backup keeps restored layers in smooth sampling mode',
       () async {
@@ -77,6 +88,26 @@ void main() {
     expect(
         provider.placements.single.rasterSampling, RasterSamplingMode.smooth);
   });
+
+  test('auto cleanup bakes vector layers with pixelated sampling', () async {
+    final DrawingProvider provider = DrawingProvider();
+    provider.setCanvasSize(const Size(768, 1024));
+
+    for (int index = 0; index < 20; index++) {
+      final double y = 20.0 + (index * 8.0);
+      provider.startNewLine(Offset(20, y));
+      provider.addPoint(Offset(120, y), Offset(20, y),
+          preserveExactPoint: true);
+      provider.endLine();
+    }
+
+    provider.optimizeMemoryForEmergency();
+    await _waitForCondition(() => provider.layerABaseImage != null);
+
+    expect(provider.layerABaseImage, isNotNull);
+    expect(provider.layerABaseSampling, RasterSamplingMode.pixelated);
+    expect(provider.lines, isEmpty);
+  });
 }
 
 Future<ui.Image> _solidImage(Color color) async {
@@ -98,4 +129,14 @@ Future<void> _writePng(ui.Image image, String path) async {
     Uint8List.sublistView(data.buffer.asUint8List()),
     flush: true,
   );
+}
+
+Future<void> _waitForCondition(bool Function() condition) async {
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 2));
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TimeoutException('Condition was not met before timeout.');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
 }

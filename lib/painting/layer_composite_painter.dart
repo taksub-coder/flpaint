@@ -1,8 +1,10 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
 import '../models/drawing.dart';
+import 'pixel_geometry.dart';
 
 /// Upper bound for "paint everything" when merging layer timelines.
 const int kLayerCompositeMaxSequence = 2000000000;
@@ -87,16 +89,15 @@ class LayerCompositePainter {
     Rect dstRect, {
     required RasterSamplingMode sampling,
   }) {
+    final Rect snappedDstRect = pixelRect(dstRect);
     final Paint paint = Paint()
-      ..isAntiAlias = sampling == RasterSamplingMode.smooth
-      ..filterQuality = sampling == RasterSamplingMode.smooth
-          ? FilterQuality.high
-          : FilterQuality.none;
+      ..isAntiAlias = false
+      ..filterQuality = FilterQuality.none;
     final bool keepsNativePixels =
-        (dstRect.width - image.width.toDouble()).abs() < 0.001 &&
-            (dstRect.height - image.height.toDouble()).abs() < 0.001;
+        snappedDstRect.width.round() == image.width &&
+            snappedDstRect.height.round() == image.height;
     if (keepsNativePixels) {
-      canvas.drawImage(image, dstRect.topLeft, paint);
+      canvas.drawImage(image, pixelOffset(snappedDstRect.topLeft), paint);
       return;
     }
 
@@ -108,7 +109,7 @@ class LayerCompositePainter {
         image.width.toDouble(),
         image.height.toDouble(),
       ),
-      dstRect,
+      snappedDstRect,
       paint,
     );
   }
@@ -363,12 +364,12 @@ class LayerCompositePainter {
     int recursionDepth = 0,
   }) {
     if (placement.isVectorPlacement) {
-      final Rect rect = placement.baseRect;
-      final Offset center = rect.center + placement.translation;
+      final Rect rect = pixelRect(placement.baseRect);
+      final Offset translation = pixelOffset(placement.translation);
+      final Offset center = pixelOffset(rect.center + translation);
       canvas.save();
       canvas.translate(center.dx, center.dy);
       canvas.rotate(placement.rotation);
-      canvas.scale(placement.scaleX, placement.scaleY);
       canvas.translate(-rect.center.dx, -rect.center.dy);
       canvas.clipPath(placement.vectorMaskPath!, doAntiAlias: false);
       paintSourceContentsUpTo(
@@ -397,21 +398,18 @@ class LayerCompositePainter {
     final ui.Image? img = placement.rasterImage;
     if (img == null) return;
 
-    final Rect rect = placement.baseRect;
-    final Offset center = rect.center + placement.translation;
+    final Rect rect = pixelRect(placement.baseRect);
+    final Offset translation = pixelOffset(placement.translation);
+    final Offset center = pixelOffset(rect.center + translation);
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(placement.rotation);
-    canvas.scale(placement.scaleX, placement.scaleY);
     canvas.translate(-rect.center.dx, -rect.center.dy);
-    paintImage(
-      canvas: canvas,
-      rect: rect,
-      image: img,
-      fit: BoxFit.fill,
-      filterQuality: placement.rasterSampling == RasterSamplingMode.smooth
-          ? FilterQuality.high
-          : FilterQuality.none,
+    _paintRasterImage(
+      canvas,
+      img,
+      rect,
+      sampling: RasterSamplingMode.pixelated,
     );
     canvas.restore();
   }
@@ -435,32 +433,29 @@ class LayerCompositePainter {
   }) {
     final ui.Image? raster = selection.rasterImage;
     if (raster != null) {
-      final Rect rect = selection.baseRect;
-      final Offset center = rect.center + selection.translation;
+      final Rect rect = pixelRect(selection.baseRect);
+      final Offset translation = pixelOffset(selection.translation);
+      final Offset center = pixelOffset(rect.center + translation);
       canvas.save();
       canvas.translate(center.dx, center.dy);
       canvas.rotate(selection.rotation);
-      canvas.scale(selection.scaleX, selection.scaleY);
       canvas.translate(-rect.center.dx, -rect.center.dy);
-      paintImage(
-        canvas: canvas,
-        rect: rect,
-        image: raster,
-        fit: BoxFit.fill,
-        filterQuality: selection.rasterSampling == RasterSamplingMode.smooth
-            ? FilterQuality.high
-            : FilterQuality.none,
+      _paintRasterImage(
+        canvas,
+        raster,
+        rect,
+        sampling: RasterSamplingMode.pixelated,
       );
       canvas.restore();
       return;
     }
 
-    final Rect rect = selection.baseRect;
-    final Offset center = rect.center + selection.translation;
+    final Rect rect = pixelRect(selection.baseRect);
+    final Offset translation = pixelOffset(selection.translation);
+    final Offset center = pixelOffset(rect.center + translation);
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(selection.rotation);
-    canvas.scale(selection.scaleX, selection.scaleY);
     canvas.translate(-rect.center.dx, -rect.center.dy);
     canvas.clipPath(selection.maskPath, doAntiAlias: false);
     paintSourceContentsUpTo(
@@ -492,8 +487,9 @@ class LayerCompositePainter {
     required ui.ImageShader? tone60Shader,
     required ui.ImageShader? tone80Shader,
   }) {
+    final List<Point> points = pixelPointList(line.points);
     final paint = Paint()
-      ..isAntiAlias = true
+      ..isAntiAlias = false
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
     final toneShader = line.isEraser
@@ -506,7 +502,7 @@ class LayerCompositePainter {
           );
     final bool isToneStroke = toneShader != null;
     paint
-      ..isAntiAlias = !isToneStroke
+      ..isAntiAlias = false
       ..shader = toneShader
       ..color = toneShader == null
           ? line.color.withValues(alpha: line.eraserAlpha)
@@ -521,66 +517,71 @@ class LayerCompositePainter {
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
-      ..filterQuality =
-          toneShader == null ? FilterQuality.low : FilterQuality.none;
+      ..filterQuality = FilterQuality.none;
 
     switch (line.tool) {
       case ToolType.rect:
       case ToolType.fillRect:
         if (line.shapeRect == null) return;
+        final Rect rect = pixelRect(line.shapeRect!);
         paint
           ..style = line.tool == ToolType.fillRect
               ? PaintingStyle.fill
               : PaintingStyle.stroke
           ..strokeCap = StrokeCap.butt
           ..strokeJoin = StrokeJoin.miter
-          ..strokeWidth = line.width;
-        canvas.drawRect(line.shapeRect!, paint);
+          ..strokeWidth = pixelDouble(line.width);
+        canvas.drawRect(rect, paint);
         return;
       case ToolType.circle:
       case ToolType.fillCircle:
         if (line.shapeRect == null) return;
+        final Rect rect = pixelRect(line.shapeRect!);
         paint
           ..style = line.tool == ToolType.fillCircle
               ? PaintingStyle.fill
               : PaintingStyle.stroke
-          ..strokeWidth = line.width;
-        canvas.drawOval(line.shapeRect!, paint);
+          ..strokeWidth = pixelDouble(line.width);
+        canvas.drawOval(rect, paint);
         return;
       case ToolType.line:
       case ToolType.radial:
-        if (line.points.length < 2) return;
+        if (points.length < 2) return;
         paint
-          ..strokeWidth = line.points.first.width
+          ..strokeWidth = points.first.width
           ..strokeCap = StrokeCap.butt
           ..strokeJoin = StrokeJoin.miter;
         final path = Path()
-          ..moveTo(line.points.first.offset.dx, line.points.first.offset.dy)
-          ..lineTo(line.points.last.offset.dx, line.points.last.offset.dy);
+          ..moveTo(points.first.offset.dx, points.first.offset.dy)
+          ..lineTo(points.last.offset.dx, points.last.offset.dy);
         canvas.drawPath(path, paint);
         return;
       case ToolType.dot30:
       case ToolType.dot60:
       case ToolType.dot80:
-        if (line.points.isEmpty) return;
+        if (points.isEmpty) return;
         paint
           ..style = PaintingStyle.fill
           ..strokeWidth = 1;
-        for (final p in line.points) {
-          canvas.drawCircle(p.offset, line.width / 2, paint);
+        for (final p in points) {
+          canvas.drawCircle(
+            pixelOffset(p.offset),
+            math.max(1, line.width.roundToDouble()) / 2,
+            paint,
+          );
         }
         return;
       default:
-        if (line.points.length < 2) return;
+        if (points.length < 2) return;
         if (!line.variableWidth) {
-          final path = _buildSmoothPath(line.points);
+          final path = pixelPolylinePath(points);
           paint
             ..style = PaintingStyle.stroke
-            ..strokeWidth = line.width;
+            ..strokeWidth = pixelDouble(line.width);
           canvas.drawPath(path, paint);
           return;
         }
-        final path = _buildVariableWidthRibbon(line.points);
+        final path = _buildVariableWidthRibbon(points);
         paint
           ..style = PaintingStyle.fill
           ..strokeWidth = 1
@@ -692,23 +693,30 @@ class LayerCompositePainter {
                         p3.offset.dy) *
                     t3);
         final width = ui.lerpDouble(p1.width, p2.width, t)!;
-        dense.add(Point(Offset(dx, dy), width));
+        dense.add(Point(
+          pixelOffset(Offset(dx, dy)),
+          math.max(1, width.roundToDouble()),
+        ));
       }
     }
-    dense.add(pts.last);
+    dense.add(pixelPoint(pts.last));
     return dense;
   }
 
   static List<Point> _lowPassFilter(List<Point> points,
       {double factor = 0.55}) {
     if (points.length < 2) return points;
-    final result = <Point>[points.first];
+    final result = <Point>[pixelPoint(points.first)];
     for (int i = 1; i < points.length; i++) {
       final previous = result.last;
       final current = points[i];
-      final filteredOffset =
-          Offset.lerp(previous.offset, current.offset, factor)!;
-      result.add(Point(filteredOffset, current.width));
+      final filteredOffset = pixelOffset(
+        Offset.lerp(previous.offset, current.offset, factor)!,
+      );
+      result.add(Point(
+        filteredOffset,
+        math.max(1, current.width.roundToDouble()),
+      ));
     }
     return result;
   }
