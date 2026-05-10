@@ -108,6 +108,26 @@ void main() {
     expect(provider.layerABaseSampling, RasterSamplingMode.pixelated);
     expect(provider.lines, isEmpty);
   });
+
+  test('auto cleanup bakes vector layers at physical pixel ratio', () async {
+    final DrawingProvider provider = DrawingProvider();
+    provider.setCanvasSize(const Size(100, 50), pixelRatio: 3.0);
+
+    for (int index = 0; index < 20; index++) {
+      final double y = 2.0 + (index * 2.0);
+      provider.startNewLine(Offset(4, y));
+      provider.addPoint(Offset(80, y), Offset(4, y), preserveExactPoint: true);
+      provider.endLine();
+    }
+
+    provider.optimizeMemoryForEmergency();
+    await _waitForCondition(() => provider.layerABaseImage != null);
+
+    expect(provider.layerABaseImage!.width, 300);
+    expect(provider.layerABaseImage!.height, 150);
+    expect(provider.layerABaseSampling, RasterSamplingMode.pixelated);
+    expect(provider.lines, isEmpty);
+  });
 }
 
 Future<ui.Image> _solidImage(Color color) async {

@@ -116,4 +116,30 @@ void main() {
       greaterThan(10),
     );
   });
+
+  test('radial preview commits full 360 degree coverage', () {
+    final DrawingProvider drawing = DrawingProvider()
+      ..setCanvasSize(const Size(240, 240))
+      ..setTool(ToolType.radial)
+      ..setLinesStartPointRatioA(1.0)
+      ..setLinesStartPointRatioB(1.0)
+      ..setRadialLineCountA(4)
+      ..setRadialLineCountB(4)
+      ..setRadialRotationAngleA(0)
+      ..setRadialRotationAngleB(0);
+
+    const Offset center = Offset(120, 120);
+    drawing.startRadialPreview(center);
+    drawing.setRadialPreviewRadius(80);
+    drawing.commitRadialPreview();
+
+    expect(drawing.lines, hasLength(8));
+    final List<Offset> ends =
+        drawing.lines.map((line) => line.points.last.offset).toList();
+    expect(ends.any((point) => point.dx > center.dx), isTrue);
+    expect(ends.any((point) => point.dx < center.dx), isTrue);
+    expect(ends.any((point) => point.dy > center.dy), isTrue);
+    expect(ends.any((point) => point.dy < center.dy), isTrue);
+    expect(drawing.radialLineCount, 8);
+  });
 }

@@ -487,9 +487,11 @@ class LayerCompositePainter {
     required ui.ImageShader? tone60Shader,
     required ui.ImageShader? tone80Shader,
   }) {
-    final List<Point> points = pixelPointList(line.points);
+    final List<Point> points = line.variableWidth
+        ? _preserveVariableWidthPoints(line.points)
+        : pixelPointList(line.points);
     final paint = Paint()
-      ..isAntiAlias = false
+      ..isAntiAlias = true
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
     final toneShader = line.isEraser
@@ -500,9 +502,8 @@ class LayerCompositePainter {
             tone60Shader: tone60Shader,
             tone80Shader: tone80Shader,
           );
-    final bool isToneStroke = toneShader != null;
     paint
-      ..isAntiAlias = false
+      ..isAntiAlias = true
       ..shader = toneShader
       ..color = toneShader == null
           ? line.color.withValues(alpha: line.eraserAlpha)
@@ -516,8 +517,7 @@ class LayerCompositePainter {
       ..blendMode = line.isEraser ? BlendMode.dstOut : BlendMode.srcOver
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..filterQuality = FilterQuality.none;
+      ..strokeJoin = StrokeJoin.round;
 
     switch (line.tool) {
       case ToolType.rect:
@@ -561,6 +561,7 @@ class LayerCompositePainter {
       case ToolType.dot80:
         if (points.isEmpty) return;
         paint
+          ..isAntiAlias = false
           ..style = PaintingStyle.fill
           ..strokeWidth = 1;
         for (final p in points) {
@@ -574,8 +575,9 @@ class LayerCompositePainter {
       default:
         if (points.length < 2) return;
         if (!line.variableWidth) {
-          final path = pixelPolylinePath(points);
+          final path = _buildSmoothPath(points);
           paint
+            ..isAntiAlias = true
             ..style = PaintingStyle.stroke
             ..strokeWidth = pixelDouble(line.width);
           canvas.drawPath(path, paint);
@@ -583,12 +585,34 @@ class LayerCompositePainter {
         }
         final path = _buildVariableWidthRibbon(points);
         paint
+          ..isAntiAlias = true
           ..style = PaintingStyle.fill
           ..strokeWidth = 1
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round;
         canvas.drawPath(path, paint);
+        if (points.length >= 2) {
+          final dense = _catmullRomDensePoints(
+            _lowPassFilter(points, factor: 0.15),
+            samples: 10,
+          );
+          if (dense.isNotEmpty) {
+            canvas.drawCircle(dense.first.offset, dense.first.width / 2, paint);
+            canvas.drawCircle(dense.last.offset, dense.last.width / 2, paint);
+          }
+        }
     }
+  }
+
+  static List<Point> _preserveVariableWidthPoints(List<Point> points) {
+    return points
+        .map(
+          (point) => Point(
+            pixelOffset(point.offset),
+            math.max(1.0, point.width),
+          ),
+        )
+        .toList(growable: false);
   }
 
   static Path _buildSmoothPath(List<Point> points) {
@@ -643,14 +667,37 @@ class LayerCompositePainter {
     final path = Path();
     if (left.isEmpty || right.isEmpty) return path;
     path.moveTo(left.first.dx, left.first.dy);
-    for (int i = 1; i < left.length; i++) {
-      path.lineTo(left[i].dx, left[i].dy);
-    }
+    _appendSmoothOffsets(path, left);
     for (int i = right.length - 1; i >= 0; i--) {
-      path.lineTo(right[i].dx, right[i].dy);
+      if (i == right.length - 1) {
+        path.lineTo(right[i].dx, right[i].dy);
+      } else {
+        final Offset current = right[i + 1];
+        final Offset next = right[i];
+        final Offset mid = Offset(
+          (current.dx + next.dx) / 2,
+          (current.dy + next.dy) / 2,
+        );
+        path.quadraticBezierTo(current.dx, current.dy, mid.dx, mid.dy);
+      }
     }
     path.close();
     return path;
+  }
+
+  static void _appendSmoothOffsets(Path path, List<Offset> points) {
+    if (points.length < 2) return;
+    for (int i = 1; i < points.length - 1; i++) {
+      final current = points[i];
+      final next = points[i + 1];
+      final mid = Offset(
+        (current.dx + next.dx) / 2,
+        (current.dy + next.dy) / 2,
+      );
+      path.quadraticBezierTo(current.dx, current.dy, mid.dx, mid.dy);
+    }
+    final last = points.last;
+    path.lineTo(last.dx, last.dy);
   }
 
   static List<Point> _catmullRomDensePoints(List<Point> pts,
@@ -694,28 +741,29 @@ class LayerCompositePainter {
                     t3);
         final width = ui.lerpDouble(p1.width, p2.width, t)!;
         dense.add(Point(
-          pixelOffset(Offset(dx, dy)),
-          math.max(1, width.roundToDouble()),
+          Offset(dx, dy),
+          math.max(1, width),
         ));
       }
     }
-    dense.add(pixelPoint(pts.last));
+    dense.add(Point(pts.last.offset, math.max(1.0, pts.last.width)));
     return dense;
   }
 
   static List<Point> _lowPassFilter(List<Point> points,
       {double factor = 0.55}) {
     if (points.length < 2) return points;
-    final result = <Point>[pixelPoint(points.first)];
+    final result = <Point>[
+      Point(points.first.offset, math.max(1.0, points.first.width)),
+    ];
     for (int i = 1; i < points.length; i++) {
       final previous = result.last;
       final current = points[i];
-      final filteredOffset = pixelOffset(
-        Offset.lerp(previous.offset, current.offset, factor)!,
-      );
+      final filteredOffset =
+          Offset.lerp(previous.offset, current.offset, factor)!;
       result.add(Point(
         filteredOffset,
-        math.max(1, current.width.roundToDouble()),
+        math.max(1, current.width),
       ));
     }
     return result;

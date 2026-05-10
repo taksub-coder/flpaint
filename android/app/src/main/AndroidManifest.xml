@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="Flaint_プロトタイプ2.1d"
+        android:label="Flpaint プロトタイプ2.1e"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

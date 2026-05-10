@@ -1,4 +1,4 @@
-//Flaint_プロトタイプ2.1d
+//Flpaint プロトタイプ2.1e
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -212,7 +212,6 @@ class DrawingProvider extends ChangeNotifier {
   DateTime? _lastCanvasChangeAt;
   bool _warmUpStarted = false;
   bool _backupInitializationStarted = false;
-  bool _toneShadersInitializing = false;
   bool _toneShadersReady = false;
   Future<void>? _toneShaderInitializationFuture;
 
@@ -275,8 +274,15 @@ class DrawingProvider extends ChangeNotifier {
   int get radialTotalLineCount => _radialLineCountA + _radialLineCountB;
   double get radialOffsetAngleA => _radialOffsetAngleA;
   double get radialOffsetAngleB => _radialOffsetAngleB;
-  double get radialOffsetDegreesA => _radialOffsetAngleA * 180.0 / math.pi;
-  double get radialOffsetDegreesB => _radialOffsetAngleB * 180.0 / math.pi;
+  double get radialOffsetDegreesA => _angleRadiansToPositiveDegrees(
+        _radialOffsetAngleA,
+      );
+  double get radialOffsetDegreesB => _angleRadiansToPositiveDegrees(
+        _radialOffsetAngleB,
+      );
+  int get radialLineCount => radialTotalLineCount;
+  double get radialRotationAngleA => radialOffsetDegreesA;
+  double get radialRotationAngleB => radialOffsetDegreesB;
 
   double get radialPreviewMaxRadius {
     final Size size = _canvasSize == Size.zero ? _ioCanvasSize : _canvasSize;
@@ -310,8 +316,9 @@ class DrawingProvider extends ChangeNotifier {
   static const double _tailNoiseDistance = 8.0;
   static const double _tailDirectionCosineThreshold = 0.6;
   // Distance-based taper lengths (speed-clamped)筆足
-  static const double _pressureTaperInBase = 14.0;
-  static const double _pressureTaperOutBase = 14.0;
+  static const double _pressureTaperInBase = 32.0;
+  static const double _pressureTaperOutBase = 32.0;
+  static const double _pressureWidthLerpFactor = 0.32;
   static const Size _ioCanvasSize = Size(768, 1024);
   static const Duration _autosaveInterval = Duration(minutes: 5);
   static const Duration _autosaveIdleThreshold = Duration(seconds: 20);
@@ -320,6 +327,7 @@ class DrawingProvider extends ChangeNotifier {
       RasterSamplingMode.smooth;
   static const RasterSamplingMode _bakedLayerSampling =
       RasterSamplingMode.pixelated;
+  double _canvasRasterPixelRatio = 1.0;
   static const int _autoBakeLineThreshold = 20;
   static const int _androidMaxUndoSnapshots = 5;
   static const int _defaultMaxUndoSnapshots = 100;
@@ -577,9 +585,16 @@ class DrawingProvider extends ChangeNotifier {
     _disposeImageIfUnreferenced(previous);
   }
 
-  void setCanvasSize(Size size) {
-    if (_canvasSize == size) return;
+  void setCanvasSize(Size size, {double? pixelRatio}) {
+    final double nextPixelRatio = _normalizeRasterPixelRatio(
+      pixelRatio ?? _platformDevicePixelRatio(),
+    );
+    if (_canvasSize == size &&
+        (_canvasRasterPixelRatio - nextPixelRatio).abs() < 0.001) {
+      return;
+    }
     _canvasSize = size;
+    _canvasRasterPixelRatio = nextPixelRatio;
     if (_tool == ToolType.radial && _radialPreviewCenter != null) {
       final Offset clampedCenter =
           _clampRadialPreviewCenter(_radialPreviewCenter!);
@@ -592,6 +607,49 @@ class DrawingProvider extends ChangeNotifier {
         _notifyUiOnly();
       }
     }
+  }
+
+  double _platformDevicePixelRatio() {
+    final Iterable<ui.FlutterView> views =
+        WidgetsBinding.instance.platformDispatcher.views;
+    if (views.isEmpty) {
+      return 1.0;
+    }
+    return views.first.devicePixelRatio;
+  }
+
+  double _normalizeRasterPixelRatio(double value) {
+    if (!value.isFinite || value <= 0.0) {
+      return 1.0;
+    }
+    return value.clamp(1.0, 4.0).toDouble();
+  }
+
+  Size _physicalCanvasSizeFor(Size logicalSize) {
+    return Size(
+      math
+          .max(1, (logicalSize.width * _canvasRasterPixelRatio).round())
+          .toDouble(),
+      math
+          .max(1, (logicalSize.height * _canvasRasterPixelRatio).round())
+          .toDouble(),
+    );
+  }
+
+  Rect _logicalCanvasRect(Size logicalSize) {
+    return Rect.fromLTWH(
+      0,
+      0,
+      logicalSize.width.roundToDouble(),
+      logicalSize.height.roundToDouble(),
+    );
+  }
+
+  Canvas _physicalRecordingCanvas(ui.PictureRecorder recorder) {
+    final Canvas canvas = Canvas(recorder);
+    canvas.drawColor(Colors.transparent, BlendMode.src);
+    canvas.scale(_canvasRasterPixelRatio);
+    return canvas;
   }
 
   void warmUp() {
@@ -819,7 +877,6 @@ class DrawingProvider extends ChangeNotifier {
       await pendingInitialization;
       return;
     }
-    _toneShadersInitializing = true;
     final Future<void> initialization = (() async {
       await _initializeToneShaders();
       _toneShadersReady = true;
@@ -829,7 +886,6 @@ class DrawingProvider extends ChangeNotifier {
       await initialization;
     } finally {
       _toneShaderInitializationFuture = null;
-      _toneShadersInitializing = false;
     }
   }
 
@@ -1026,8 +1082,7 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   void setRadialOffsetAngleA(double degrees) {
-    final double clamped = degrees.clamp(-180.0, 180.0).toDouble();
-    final double radians = clamped * math.pi / 180.0;
+    final double radians = _positiveDegreesToRadians(degrees);
     if ((_radialOffsetAngleA - radians).abs() < 0.0001) return;
     _radialOffsetAngleA = radians;
     if (_tool == ToolType.radial && _radialPreviewCenter != null) {
@@ -1038,8 +1093,7 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   void setRadialOffsetAngleB(double degrees) {
-    final double clamped = degrees.clamp(-180.0, 180.0).toDouble();
-    final double radians = clamped * math.pi / 180.0;
+    final double radians = _positiveDegreesToRadians(degrees);
     if ((_radialOffsetAngleB - radians).abs() < 0.0001) return;
     _radialOffsetAngleB = radians;
     if (_tool == ToolType.radial && _radialPreviewCenter != null) {
@@ -1047,6 +1101,26 @@ class DrawingProvider extends ChangeNotifier {
       return;
     }
     _notifyUiOnly();
+  }
+
+  void setRadialRotationAngleA(double degrees) {
+    setRadialOffsetAngleA(degrees);
+  }
+
+  void setRadialRotationAngleB(double degrees) {
+    setRadialOffsetAngleB(degrees);
+  }
+
+  static double _positiveDegreesToRadians(double degrees) {
+    final double normalized = degrees.isFinite ? degrees % 360.0 : 0.0;
+    final double positive = normalized < 0.0 ? normalized + 360.0 : normalized;
+    return positive * math.pi / 180.0;
+  }
+
+  static double _angleRadiansToPositiveDegrees(double radians) {
+    final double degrees = radians * 180.0 / math.pi;
+    final double normalized = degrees % 360.0;
+    return normalized < 0.0 ? normalized + 360.0 : normalized;
   }
 
   void startRadialPreview(Offset center) {
@@ -1375,11 +1449,10 @@ class DrawingProvider extends ChangeNotifier {
       }),
     );
 
+    final Size physicalSize = _physicalCanvasSizeFor(canvasSize);
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    final Rect bounds =
-        Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height);
-    canvas.drawColor(Colors.transparent, BlendMode.src);
+    final canvas = _physicalRecordingCanvas(recorder);
+    final Rect bounds = _logicalCanvasRect(canvasSize);
 
     for (int i = 0; i < _backupLayers.length; i++) {
       final double opacity = _layerOpacityFor(_backupLayers[i]);
@@ -1388,14 +1461,19 @@ class DrawingProvider extends ChangeNotifier {
         bounds,
         Paint()..color = Colors.white.withValues(alpha: opacity),
       );
-      canvas.drawImage(snapshots[i], Offset.zero, Paint());
+      _drawRasterImageToRect(
+        canvas,
+        snapshots[i],
+        bounds,
+        sampling: _bakedLayerSampling,
+      );
       canvas.restore();
     }
 
     final picture = recorder.endRecording();
     final ui.Image merged = await picture.toImage(
-      canvasSize.width.ceil(),
-      canvasSize.height.ceil(),
+      physicalSize.width.toInt(),
+      physicalSize.height.toInt(),
     );
     for (final ui.Image snapshot in snapshots) {
       snapshot.dispose();
@@ -1468,8 +1546,11 @@ class DrawingProvider extends ChangeNotifier {
       canvasSize,
     );
     final bool importFillsCanvas = _rectFillsCanvas(dstRect, canvasSize);
-    final bool canUseImportedImageDirectly =
-        importFillsCanvas && !_layerHasCommittedContent(_activeLayer);
+    final Size physicalCanvasSize = _physicalCanvasSizeFor(canvasSize);
+    final bool canUseImportedImageDirectly = importFillsCanvas &&
+        frame.image.width == physicalCanvasSize.width.toInt() &&
+        frame.image.height == physicalCanvasSize.height.toInt() &&
+        !_layerHasCommittedContent(_activeLayer);
     if (canUseImportedImageDirectly) {
       _setLayerBaseImage(
         _activeLayer,
@@ -1723,24 +1804,17 @@ class DrawingProvider extends ChangeNotifier {
     Rect dstRect,
     Size canvasSize,
   ) async {
-    final int outputWidth = pixelInt(canvasSize.width);
-    final int outputHeight = pixelInt(canvasSize.height);
-    final Size outputSize =
-        Size(outputWidth.toDouble(), outputHeight.toDouble());
-    final Rect canvasRect =
-        Rect.fromLTWH(0, 0, outputSize.width, outputSize.height);
+    final Size physicalSize = _physicalCanvasSizeFor(canvasSize);
+    final Rect canvasRect = _logicalCanvasRect(canvasSize);
     final Rect snappedDstRect = pixelRect(dstRect);
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawColor(Colors.transparent, BlendMode.src);
+    final canvas = _physicalRecordingCanvas(recorder);
 
     final ui.Image? layerBaseImage = switch (layer) {
       DrawingLayer.layerA => _layerABaseImage,
       DrawingLayer.layerB => _layerBBaseImage,
       DrawingLayer.layerC => _layerCBaseImage,
     };
-    final bool importFillsCanvas = _rectFillsCanvas(snappedDstRect, outputSize);
-
     if (layerBaseImage != null) {
       _drawRasterImageToRect(
         canvas,
@@ -1758,7 +1832,10 @@ class DrawingProvider extends ChangeNotifier {
     );
 
     final picture = recorder.endRecording();
-    return picture.toImage(outputWidth, outputHeight);
+    return picture.toImage(
+      physicalSize.width.toInt(),
+      physicalSize.height.toInt(),
+    );
   }
 
   double _exportPixelRatio(BuildContext? context) {
@@ -1774,18 +1851,19 @@ class DrawingProvider extends ChangeNotifier {
     Size outputSize, {
     Size logicalSize = _ioCanvasSize,
   }) async {
-    final int outputWidth = pixelInt(logicalSize.width);
-    final int outputHeight = pixelInt(logicalSize.height);
-    final Size pixelLogicalSize =
-        Size(outputWidth.toDouble(), outputHeight.toDouble());
+    final int outputWidth = pixelInt(outputSize.width);
+    final int outputHeight = pixelInt(outputSize.height);
+    final double scaleX = outputWidth / logicalSize.width;
+    final double scaleY = outputHeight / logicalSize.height;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     canvas.drawColor(Colors.transparent, BlendMode.src);
+    canvas.scale(scaleX, scaleY);
 
     if (_isLayerAVisible && _layerAOpacity > 0) {
       _paintLayerCompositeForExport(
         canvas,
-        pixelLogicalSize,
+        logicalSize,
         DrawingLayer.layerA,
         _layerAOpacity,
       );
@@ -1793,7 +1871,7 @@ class DrawingProvider extends ChangeNotifier {
     if (_isLayerBVisible && _layerBOpacity > 0) {
       _paintLayerCompositeForExport(
         canvas,
-        pixelLogicalSize,
+        logicalSize,
         DrawingLayer.layerB,
         _layerBOpacity,
       );
@@ -1801,7 +1879,7 @@ class DrawingProvider extends ChangeNotifier {
     if (_isLayerCVisible && _layerCOpacity > 0) {
       _paintLayerCompositeForExport(
         canvas,
-        pixelLogicalSize,
+        logicalSize,
         DrawingLayer.layerC,
         _layerCOpacity,
       );
@@ -2093,9 +2171,9 @@ class DrawingProvider extends ChangeNotifier {
   }
 
   Future<ui.Image> _renderLayerSnapshot(DrawingLayer layer, Size size) async {
+    final Size physicalSize = _physicalCanvasSizeFor(size);
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawColor(Colors.transparent, BlendMode.src);
+    final canvas = _physicalRecordingCanvas(recorder);
 
     _paintLayerSourceContents(canvas, layer);
     if (_selection != null && _selection!.layer == layer) {
@@ -2109,7 +2187,10 @@ class DrawingProvider extends ChangeNotifier {
     }
 
     final picture = recorder.endRecording();
-    return picture.toImage(size.width.ceil(), size.height.ceil());
+    return picture.toImage(
+      physicalSize.width.toInt(),
+      physicalSize.height.toInt(),
+    );
   }
 
   Future<void> _writeImageAsPng(ui.Image image, String outputPath) async {
@@ -2344,7 +2425,7 @@ class DrawingProvider extends ChangeNotifier {
   // ==========================================
   void optimizeMemoryForEmergency() {
     debugPrint(
-      '🚨 [Flaint_プロトタイプ2.1d] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
+      '🚨 [Flpaint プロトタイプ2.1e] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
     );
 
     _clearRedoStack();
@@ -2366,7 +2447,7 @@ class DrawingProvider extends ChangeNotifier {
     }
 
     debugPrint(
-      '✅ [Flaint_プロトタイプ2.1d] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
+      '✅ [Flpaint プロトタイプ2.1e] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
     );
     _notifyUiOnly();
   }
@@ -2451,9 +2532,13 @@ class DrawingProvider extends ChangeNotifier {
       final t = ((totalLen - d) / taperOutLen).clamp(0.0, 1.0);
       final eased = math.pow(t, 1.2).toDouble(); // 滑らかなカーブ
 
-      final w = math.max(1.0, pts[i].width * eased);
+      final w = math.max(1.0, pts[i].width * _easeInOut(t + (eased * 0.0)));
       pts[i] = Point(pts[i].offset, w);
     }
+  }
+
+  double _easeInOut(double t) {
+    return Curves.easeInOut.transform(t.clamp(0.0, 1.0).toDouble());
   }
 
   double _normalizedSpeed() {
@@ -2540,7 +2625,9 @@ class DrawingProvider extends ChangeNotifier {
 
   DrawnLine _cloneLine(DrawnLine src) {
     return DrawnLine(
-      pixelPointList(src.points),
+      src.variableWidth
+          ? _clonePressurePoints(src.points)
+          : pixelPointList(src.points),
       color: src.color,
       width: src.width,
       tool: src.tool,
@@ -2552,6 +2639,17 @@ class DrawingProvider extends ChangeNotifier {
       layer: src.layer,
       shapeRect: src.shapeRect == null ? null : pixelRect(src.shapeRect!),
     );
+  }
+
+  List<Point> _clonePressurePoints(List<Point> points) {
+    return points
+        .map(
+          (point) => Point(
+            pixelOffset(point.offset),
+            math.max(1.0, point.width),
+          ),
+        )
+        .toList(growable: false);
   }
 
   LayerPlacement _clonePlacement(LayerPlacement src) {
@@ -2682,18 +2780,33 @@ class DrawingProvider extends ChangeNotifier {
       final baseWidth = _currentLine!.width * speedFactor;
 
       final distanceFromStart = (smoothedOffset - _lineStartPoint!).distance;
+      final taperInLength =
+          math.max(_pressureTaperInBase, _currentLine!.width * 2.0);
 
       // 入りの処理（7.0pxかけて1pxから太くする）
       if (distanceFromStart <= _pressureTaperInBase) {
-        final t = (distanceFromStart / _pressureTaperInBase).clamp(0.0, 1.0);
-        final eased = math.pow(t, 1.5).toDouble();
-        width = math.max(1.0, baseWidth * eased);
+        final t = (distanceFromStart / taperInLength).clamp(0.0, 1.0);
+        width = math.max(1.0, baseWidth * _easeInOut(t));
       } else {
         width = baseWidth;
       }
+      final double easedTargetWidth = distanceFromStart <= taperInLength
+          ? math.max(
+              1.0,
+              baseWidth *
+                  _easeInOut(
+                    (distanceFromStart / taperInLength).clamp(0.0, 1.0),
+                  ),
+            )
+          : baseWidth;
+      width = ui.lerpDouble(
+        lastStored.width,
+        easedTargetWidth,
+        _pressureWidthLerpFactor,
+      )!;
     }
 
-    currentPoints.add(Point(smoothedOffset, math.max(1, width.roundToDouble())));
+    currentPoints.add(Point(smoothedOffset, math.max(1.0, width)));
     notifyListeners();
   }
 
@@ -2973,18 +3086,18 @@ class DrawingProvider extends ChangeNotifier {
     final DrawingLayer layer = selection.layer;
     final Path path = Path()..addPath(selection.maskPath, Offset.zero);
     final Rect bounds = pixelOuterRect(selection.baseRect);
-    final int sampledWidth = math.max(
-      1,
-      canvasSize.width.round(),
+    final Size physicalCanvasSize = _physicalCanvasSizeFor(canvasSize);
+    final Rect physicalBounds = Rect.fromLTRB(
+      (bounds.left * _canvasRasterPixelRatio).roundToDouble(),
+      (bounds.top * _canvasRasterPixelRatio).roundToDouble(),
+      (bounds.right * _canvasRasterPixelRatio).roundToDouble(),
+      (bounds.bottom * _canvasRasterPixelRatio).roundToDouble(),
     );
-    final int sampledHeight = math.max(
-      1,
-      canvasSize.height.round(),
-    );
+    final int cropWidth = pixelInt(physicalBounds.width);
+    final int cropHeight = pixelInt(physicalBounds.height);
 
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawColor(Colors.transparent, BlendMode.src);
+    final canvas = _physicalRecordingCanvas(recorder);
     canvas.save();
     canvas.clipPath(path, doAntiAlias: false);
     // Render in canvas coordinates first, then crop, to preserve tone pixels.
@@ -2993,8 +3106,8 @@ class DrawingProvider extends ChangeNotifier {
     final picture = recorder.endRecording();
 
     final ui.Image maskedLayer = await picture.toImage(
-      sampledWidth,
-      sampledHeight,
+      physicalCanvasSize.width.toInt(),
+      physicalCanvasSize.height.toInt(),
     );
 
     final cropRecorder = ui.PictureRecorder();
@@ -3002,22 +3115,19 @@ class DrawingProvider extends ChangeNotifier {
     cropCanvas.drawColor(Colors.transparent, BlendMode.src);
     cropCanvas.drawImageRect(
       maskedLayer,
-      bounds,
+      physicalBounds,
       Rect.fromLTWH(
         0,
         0,
-        bounds.width.roundToDouble(),
-        bounds.height.roundToDouble(),
+        cropWidth.toDouble(),
+        cropHeight.toDouble(),
       ),
       Paint()
         ..isAntiAlias = false
         ..filterQuality = FilterQuality.none,
     );
     final cropPicture = cropRecorder.endRecording();
-    final ui.Image cropped = await cropPicture.toImage(
-      pixelInt(bounds.width),
-      pixelInt(bounds.height),
-    );
+    final ui.Image cropped = await cropPicture.toImage(cropWidth, cropHeight);
     maskedLayer.dispose();
     return cropped;
   }
@@ -3535,13 +3645,16 @@ class DrawingProvider extends ChangeNotifier {
     DrawingLayer layer,
     LassoSelection selection,
   ) async {
+    final Size physicalSize = _physicalCanvasSizeFor(size);
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    canvas.drawColor(Colors.transparent, BlendMode.src);
+    final canvas = _physicalRecordingCanvas(recorder);
     _paintLayerSourceContents(canvas, layer);
     _clearSelectionArea(canvas, selection);
     final picture = recorder.endRecording();
-    return picture.toImage(size.width.ceil(), size.height.ceil());
+    return picture.toImage(
+      physicalSize.width.toInt(),
+      physicalSize.height.toInt(),
+    );
   }
 
   // Selection manipulation

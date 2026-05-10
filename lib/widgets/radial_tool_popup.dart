@@ -129,11 +129,11 @@ class RadialToolPopup extends StatelessWidget {
             _PopupSliderRow(
               label: '角度',
               value: radialOffsetDegreesA,
-              min: -180,
-              max: 180,
+              min: 0,
+              max: 360,
               divisions: 360,
               valueText: radialOffsetDegreesA.round().toString(),
-              onChanged: drawing.setRadialOffsetAngleA,
+              onChanged: drawing.setRadialRotationAngleA,
             ),
             _PopupSliderRow(
               label: '長さ',
@@ -162,11 +162,11 @@ class RadialToolPopup extends StatelessWidget {
             _PopupSliderRow(
               label: '角度',
               value: radialOffsetDegreesB,
-              min: -180,
-              max: 180,
+              min: 0,
+              max: 360,
               divisions: 360,
               valueText: radialOffsetDegreesB.round().toString(),
-              onChanged: drawing.setRadialOffsetAngleB,
+              onChanged: drawing.setRadialRotationAngleB,
             ),
             _PopupSliderRow(
               label: '長さ',

@@ -75,7 +75,10 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
             if (_canvasSize != logicalSize) {
               _canvasSize = logicalSize;
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                drawing.setCanvasSize(logicalSize);
+                drawing.setCanvasSize(
+                  logicalSize,
+                  pixelRatio: MediaQuery.devicePixelRatioOf(context),
+                );
               });
             }
             return Listener(
@@ -1358,9 +1361,8 @@ class StaticLayerPainter extends CustomPainter {
       ..filterQuality = FilterQuality.none;
     final Rect dstRect =
         pixelRectFromLTWH(0, 0, canvasSize.width, canvasSize.height);
-    final bool keepsNativePixels =
-        dstRect.width.round() == image.width &&
-            dstRect.height.round() == image.height;
+    final bool keepsNativePixels = dstRect.width.round() == image.width &&
+        dstRect.height.round() == image.height;
     if (keepsNativePixels) {
       canvas.drawImage(image, pixelOffset(dstRect.topLeft), paint);
     } else {
