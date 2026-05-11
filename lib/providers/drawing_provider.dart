@@ -1,4 +1,4 @@
-//Flpaint プロトタイプ2.1e
+//Flpaint プロトタイプ2.1f
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -2425,7 +2425,7 @@ class DrawingProvider extends ChangeNotifier {
   // ==========================================
   void optimizeMemoryForEmergency() {
     debugPrint(
-      '🚨 [Flpaint プロトタイプ2.1e] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
+      '🚨 [Flpaint プロトタイプ2.1f] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
     );
 
     _clearRedoStack();
@@ -2447,7 +2447,7 @@ class DrawingProvider extends ChangeNotifier {
     }
 
     debugPrint(
-      '✅ [Flpaint プロトタイプ2.1e] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
+      '✅ [Flpaint プロトタイプ2.1f] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
     );
     _notifyUiOnly();
   }
@@ -2669,8 +2669,8 @@ class DrawingProvider extends ChangeNotifier {
           : (Path()..addPath(src.sourceMaskPath!, Offset.zero)),
       baseRect: pixelRect(src.baseRect),
       translation: pixelOffset(src.translation),
-      scaleX: 1,
-      scaleY: 1,
+      scaleX: src.scaleX,
+      scaleY: src.scaleY,
       rotation: src.rotation,
     );
   }
@@ -2686,8 +2686,8 @@ class DrawingProvider extends ChangeNotifier {
       layer: src.layer,
       baseRect: pixelRect(src.baseRect),
       translation: pixelOffset(src.translation),
-      scaleX: 1,
-      scaleY: 1,
+      scaleX: src.scaleX,
+      scaleY: src.scaleY,
       rotation: src.rotation,
     );
   }
@@ -3732,18 +3732,12 @@ class DrawingProvider extends ChangeNotifier {
   }) {
     if (_selection == null) return SelectionHandle.none;
     final handles = _handlePositions(_selection!);
-    final double touchTargetSize = math.max(14.0, math.min(handleRadius, 18.0));
     SelectionHandle nearestHandle = SelectionHandle.none;
     double nearestDistance = double.infinity;
     for (final entry in handles.entries) {
       if (entry.key == SelectionHandle.mirror) continue;
-      final Rect hitRect = Rect.fromCenter(
-        center: entry.value,
-        width: touchTargetSize,
-        height: touchTargetSize,
-      );
-      if (!hitRect.contains(position)) continue;
       final double distance = (entry.value - position).distance;
+      if (distance > handleRadius) continue;
       if (distance < nearestDistance) {
         nearestDistance = distance;
         nearestHandle = entry.key;

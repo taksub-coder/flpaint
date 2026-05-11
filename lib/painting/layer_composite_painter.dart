@@ -370,6 +370,7 @@ class LayerCompositePainter {
       canvas.save();
       canvas.translate(center.dx, center.dy);
       canvas.rotate(placement.rotation);
+      canvas.scale(placement.scaleX, placement.scaleY);
       canvas.translate(-rect.center.dx, -rect.center.dy);
       canvas.clipPath(placement.vectorMaskPath!, doAntiAlias: false);
       paintSourceContentsUpTo(
@@ -404,6 +405,7 @@ class LayerCompositePainter {
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(placement.rotation);
+    canvas.scale(placement.scaleX, placement.scaleY);
     canvas.translate(-rect.center.dx, -rect.center.dy);
     _paintRasterImage(
       canvas,
@@ -439,6 +441,7 @@ class LayerCompositePainter {
       canvas.save();
       canvas.translate(center.dx, center.dy);
       canvas.rotate(selection.rotation);
+      canvas.scale(selection.scaleX, selection.scaleY);
       canvas.translate(-rect.center.dx, -rect.center.dy);
       _paintRasterImage(
         canvas,
@@ -456,6 +459,7 @@ class LayerCompositePainter {
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(selection.rotation);
+    canvas.scale(selection.scaleX, selection.scaleY);
     canvas.translate(-rect.center.dx, -rect.center.dy);
     canvas.clipPath(selection.maskPath, doAntiAlias: false);
     paintSourceContentsUpTo(

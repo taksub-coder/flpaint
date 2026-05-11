@@ -20,6 +20,6 @@ void main() {
       ),
     );
 
-    expect(find.text('Flpaint プロトタイプ2.1e'), findsOneWidget);
+    expect(find.text('Flpaint プロトタイプ2.1f'), findsOneWidget);
   });
 }
