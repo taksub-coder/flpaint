@@ -58,9 +58,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       Duration(milliseconds: 700);
   static const double _strokeResumeDistanceThreshold = 42.0;
   static const double _palmRadiusThreshold = 24.0;
-  //もっと長い距離をかけて細くしたい場合は、以下の定数を大きくします。
-  static const double _minHandleDistance = 60.0; // 入り
-  static const double _rotationSoftRadius = 80.0; // 抜き（払い）は特にながく
+  static const double _rotationSoftRadius = 80.0;
   static const double _rotationSensitivity = 0.85;
 
   @override
@@ -1025,10 +1023,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         final startLen = startVec.distance;
         final currentLen = currentVec.distance;
         if (startLen > 0.001 && currentLen > 0.001) {
-          final double safeStartLen = math.max(startLen, _minHandleDistance);
-          final double safeCurrentLen =
-              math.max(currentLen, _minHandleDistance);
-          final scale = safeCurrentLen / safeStartLen;
+          final double scale = (currentLen / startLen).clamp(0.05, 20.0);
           final double baseAngle = _stableAngleDelta(startVec, currentVec);
           final double radiusFactor =
               (math.min(startLen, currentLen) / _rotationSoftRadius)
@@ -1052,10 +1047,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         final startAxis = startVec.dx.abs();
         final currentAxis = currentVec.dx.abs();
         if (startAxis > 0.001) {
-          final double safeStartAxis = math.max(startAxis, _minHandleDistance);
-          final double safeCurrentAxis =
-              math.max(currentAxis, _minHandleDistance);
-          final scaleX = (safeCurrentAxis / safeStartAxis).clamp(0.05, 20.0);
+          final scaleX = (currentAxis / startAxis).clamp(0.05, 20.0);
           drawing.setSelectionTransform(
             translation: state.initialTranslation,
             scaleX: state.initialScaleX * scaleX,
@@ -1073,10 +1065,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
         final startAxis = startVec.dy.abs();
         final currentAxis = currentVec.dy.abs();
         if (startAxis > 0.001) {
-          final double safeStartAxis = math.max(startAxis, _minHandleDistance);
-          final double safeCurrentAxis =
-              math.max(currentAxis, _minHandleDistance);
-          final scaleY = (safeCurrentAxis / safeStartAxis).clamp(0.05, 20.0);
+          final scaleY = (currentAxis / startAxis).clamp(0.05, 20.0);
           drawing.setSelectionTransform(
             translation: state.initialTranslation,
             scaleX: state.initialScaleX,

@@ -402,16 +402,21 @@ class LayerCompositePainter {
     final Rect rect = pixelRect(placement.baseRect);
     final Offset translation = pixelOffset(placement.translation);
     final Offset center = pixelOffset(rect.center + translation);
+    final Rect dstRect = _scaledRectAroundCenter(
+      rect,
+      placement.scaleX.abs(),
+      placement.scaleY.abs(),
+    );
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(placement.rotation);
-    canvas.scale(placement.scaleX, placement.scaleY);
+    canvas.scale(_scaleSign(placement.scaleX), _scaleSign(placement.scaleY));
     canvas.translate(-rect.center.dx, -rect.center.dy);
     _paintRasterImage(
       canvas,
       img,
-      rect,
-      sampling: RasterSamplingMode.pixelated,
+      dstRect,
+      sampling: placement.rasterSampling,
     );
     canvas.restore();
   }
@@ -438,16 +443,21 @@ class LayerCompositePainter {
       final Rect rect = pixelRect(selection.baseRect);
       final Offset translation = pixelOffset(selection.translation);
       final Offset center = pixelOffset(rect.center + translation);
+      final Rect dstRect = _scaledRectAroundCenter(
+        rect,
+        selection.scaleX.abs(),
+        selection.scaleY.abs(),
+      );
       canvas.save();
       canvas.translate(center.dx, center.dy);
       canvas.rotate(selection.rotation);
-      canvas.scale(selection.scaleX, selection.scaleY);
+      canvas.scale(_scaleSign(selection.scaleX), _scaleSign(selection.scaleY));
       canvas.translate(-rect.center.dx, -rect.center.dy);
       _paintRasterImage(
         canvas,
         raster,
-        rect,
-        sampling: RasterSamplingMode.pixelated,
+        dstRect,
+        sampling: selection.rasterSampling,
       );
       canvas.restore();
       return;
@@ -483,6 +493,22 @@ class LayerCompositePainter {
     );
     canvas.restore();
   }
+
+  static Rect _scaledRectAroundCenter(
+    Rect rect,
+    double scaleX,
+    double scaleY,
+  ) {
+    final Offset center = rect.center;
+    return Rect.fromLTRB(
+      center.dx + ((rect.left - center.dx) * scaleX),
+      center.dy + ((rect.top - center.dy) * scaleY),
+      center.dx + ((rect.right - center.dx) * scaleX),
+      center.dy + ((rect.bottom - center.dy) * scaleY),
+    );
+  }
+
+  static double _scaleSign(double value) => value < 0.0 ? -1.0 : 1.0;
 
   static void _paintLine(
     Canvas canvas,
