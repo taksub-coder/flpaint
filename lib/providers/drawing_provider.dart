@@ -1,4 +1,4 @@
-//Flpaint プロトタイプ2.1f
+//Flapaint　プロトタイプ2.1ｇ
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -2425,7 +2425,7 @@ class DrawingProvider extends ChangeNotifier {
   // ==========================================
   void optimizeMemoryForEmergency() {
     debugPrint(
-      '🚨 [Flpaint プロトタイプ2.1f] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
+      '🚨 [Flapaint　プロトタイプ2.1ｇ] 低パフォーマンスを検知。メモリを解放して描画を高速化します...',
     );
 
     _clearRedoStack();
@@ -2447,7 +2447,7 @@ class DrawingProvider extends ChangeNotifier {
     }
 
     debugPrint(
-      '✅ [Flpaint プロトタイプ2.1f] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
+      '✅ [Flapaint　プロトタイプ2.1ｇ] 解放完了: 履歴を縮小し、描画のレスポンスを改善しました。',
     );
     _notifyUiOnly();
   }

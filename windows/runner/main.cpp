@@ -28,7 +28,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   if (!window.Create(
-          L"Flpaint \u30D7\u30ED\u30C8\u30BF\u30A4\u30D72.1f",
+          L"Flapaint\u3000\u30D7\u30ED\u30C8\u30BF\u30A4\u30D72.1\uFF47",
           origin,
           size)) {
     return EXIT_FAILURE;
